@@ -1,0 +1,114 @@
+{
+  "name": "webar-frame-viewer",
+  "version": "0.1.0",
+  "description": "Visualizador de quadros em Realidade Aumentada no navegador (WebXR + fallback de câmera).",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/frame-viewer.umd.min.js",
+  "jsdelivr": "./dist/frame-viewer.umd.min.js",
+
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./vanilla": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.mjs"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
+    "./styles.css": "./dist/overlay.css",
+    "./overlay.css": "./dist/overlay.css",
+    "./umd": "./dist/frame-viewer.umd.min.js",
+    "./package.json": "./package.json"
+  },
+
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "three": ">=0.160.0 <1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.185.0",
+    "@types/webxr": "^0.5.20",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.185.0"
+  },
+
+  "scripts": {
+    "prebuild": "node -e \"import('node:fs').then(f=>f.rmSync('dist',{recursive:true,force:true}))\"",
+    "build": "tsup && node scripts/size.mjs",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "size": "node scripts/size.mjs",
+    "prepublishOnly": "npm run build"
+  },
+
+  "keywords": [
+    "webar",
+    "webxr",
+    "ar",
+    "three.js",
+    "augmented-reality",
+    "quadro",
+    "moldura"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phr31/3DWebAR.git",
+    "directory": "packages/webar-frame-viewer"
+  },
+  "homepage": "https://github.com/phr31/3DWebAR#readme"
+}

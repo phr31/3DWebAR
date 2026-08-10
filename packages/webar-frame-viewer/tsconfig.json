@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["webxr", "node"]
+  },
+  "include": ["src", "tsup.config.ts"]
+}

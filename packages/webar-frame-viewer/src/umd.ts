@@ -1,0 +1,24 @@
+import { ARController, type ViewerConfig } from './core/ARController';
+import { detectCapabilities } from './core/capabilities';
+import { provideThree, setDefaultThreeLoader, type ThreeNS } from './core/loadThree';
+
+/** Manter em sincronia com o range de `peerDependencies.three`. */
+const THREE_VERSION = '0.185.1';
+
+// URL absoluta e montada por função: `import('three')` com bare specifier falha
+// em <script> clássico, e um literal seria dobrado pelo esbuild na análise
+// estática — o que faria o three inteiro entrar neste bundle.
+function cdnUrl(version: string): string {
+  return `https://cdn.jsdelivr.net/npm/three@${version}/+esm`;
+}
+
+setDefaultThreeLoader(
+  () =>
+    import(/* webpackIgnore: true */ /* @vite-ignore */ cdnUrl(THREE_VERSION)) as Promise<ThreeNS>,
+);
+
+// Só named exports: `export default` faria `window.FrameViewer.default.create(...)`.
+export const create = (config: ViewerConfig): ARController => ARController.create(config);
+export const isSupported = detectCapabilities;
+export { userMessage } from './core/errors';
+export { ARController, provideThree };

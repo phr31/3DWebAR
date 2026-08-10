@@ -1,0 +1,6 @@
+{
+  "name": "example-vanilla",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Exemplo com <script> UMD. Sem toolchain — sirva a pasta por HTTPS."
+}

@@ -1,0 +1,31 @@
+{
+  "name": "3dwebar-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run dev -w webar-frame-viewer",
+    "build": "npm run build -w webar-frame-viewer",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "size": "npm run size -w webar-frame-viewer",
+    "ex:next": "npm run dev -w example-nextjs",
+    "tunnel:xampp": "cloudflared tunnel --url http://localhost:80",
+    "tunnel:next": "cloudflared tunnel --url http://localhost:3000",
+    "check:pkg": "npm pack --dry-run -w webar-frame-viewer"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.7.0"
+  }
+}
