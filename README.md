@@ -882,7 +882,7 @@ O próprio overlay exibe essa garantia ao usuário (chave `privacy`).
 
 ```
 packages/webar-frame-viewer/   a biblioteca
-examples/vanilla/              exemplo com <script> UMD (servido pelo XAMPP)
+examples/vanilla/              exemplo com <script> UMD (servido por `npm run serve`)
 examples/nextjs/               exemplo App Router (Next 15 + React 19)
 ```
 
@@ -901,6 +901,10 @@ npm run format         # biome check --write
 npm run size           # só o guard de tamanho
 npm run check:pkg      # npm pack --dry-run — mostra o que vai para o tarball
 npm run ex:next        # exemplo Next.js em :3000
+
+npm run serve          # servidor estático da raiz em :8080, com `cache-control: no-store`
+npm run tunnel         # túnel cloudflared apontando para :8080
+npm run mobile         # os dois acima em um terminal só, já imprimindo a URL final
 ```
 
 > Não há suíte de testes automatizados neste repositório. A verificação é manual, no
@@ -951,26 +955,58 @@ npm run size
 
 ## Testar no celular
 
-O único método que cobre Android **e** iPhone, com certificado confiável, sem conta e sem
-instalar CA:
+O túnel HTTPS é o único método que cobre Android **e** iPhone, com certificado confiável,
+sem conta, sem instalar CA — e **sem exigir que PC e celular estejam na mesma rede**.
 
 ```powershell
 winget install --id Cloudflare.cloudflared     # uma vez
 
-# terminal 1 — sirva os arquivos
-#   XAMPP já serve examples/vanilla em http://localhost/3DWebAR/examples/vanilla/
-npm run ex:next                                # ou o exemplo Next em :3000
-
-# terminal 2 — abra o túnel
-npm run tunnel:xampp                           # ou npm run tunnel:next
+npm run build     # o exemplo vanilla carrega o UMD de dist/
+npm run mobile    # servidor :8080 + túnel, um terminal só
 ```
 
-Abra no celular a URL `https://*.trycloudflare.com` que o `cloudflared` imprimir.
-O exemplo Next já libera esses domínios em `next.config.mjs` (`allowedDevOrigins`).
+O comando imprime a URL pronta:
 
-Alternativa só-Android, com latência mínima e zero certificado: depuração USB +
-`chrome://inspect` → *Port forwarding*. `http://localhost:*` é *trustworthy origin* por
-definição, e o `immersive-ar` funciona de verdade ali.
+```
+  Abra no celular:
+  https://random-words-1234.trycloudflare.com/examples/vanilla/diagnostico.html
+```
+
+### `examples/vanilla/diagnostico.html`
+
+A página de QA existe para ser lida no aparelho, sem DevTools. Ela traz:
+
+- Tabela de ambiente com o `CapabilityReport` inteiro. No Android com ARCore o esperado é
+  `secureContext: true`, `webgl: true`, `immersiveAR: true`, `recommended: "webxr"`. Se
+  `recommended` vier `null`, o campo `reason` diz o motivo.
+- Log na tela capturando `console.*`, `window.onerror` e `unhandledrejection`, com botão
+  de copiar.
+- Formulário de config persistido em `localStorage` e "Copiar link desta config", que gera
+  um `?cfg=<json>` — a forma de empurrar um cenário do desktop para o celular sem digitar.
+- Barra de QA (`start` / `pause` / `resume` / `place` / `reset`) acima do overlay da lib.
+- Checklist de 8 passos: engine escolhida, sequência de hints (scan → aim-wall →
+  tap-to-place), conferir com fita métrica a largura projetada contra `widthCm`, forçar
+  passthrough, timeout sem parede, `capture()`, negar a câmera → `CAMERA_DENIED`, e
+  `destroy()` duplo.
+
+Toque no botão para iniciar: `requestSession` exige ativação do usuário, e é por isso que
+`autoStart` é `false` por padrão. Abra no Chrome — dentro do webview do
+Instagram/Facebook o `getUserMedia` é bloqueado pela plataforma.
+
+### Notas do túnel
+
+- A URL é **pública** enquanto o terminal estiver aberto: qualquer um com o link acessa.
+- Cada execução gera uma URL nova (*quick tunnel*); não vale salvar.
+- Depois de um `npm run build`, basta recarregar no celular — o `no-store` do
+  `scripts/dev-server.mjs` evita o bundle velho em cache.
+
+### Alternativas
+
+| Cenário | Como |
+|---|---|
+| Exemplo Next.js | `npm run ex:next` + `npm run tunnel:next`. Os domínios de túnel já estão liberados em `examples/nextjs/next.config.mjs` (`allowedDevOrigins`) |
+| Servir pelo XAMPP | `http://localhost/3DWebAR/examples/vanilla/` + `npm run tunnel:xampp`. O Apache **não** manda `no-store`: depois de um rebuild o celular tende a servir o bundle antigo |
+| Android por cabo | Depuração USB + `chrome://inspect` → *Port forwarding* `8080 → localhost:8080`. Latência mínima e zero certificado, já que `http://localhost:*` é *trustworthy origin* por definição — mas exige o cabo, então não serve quando o aparelho está longe |
 
 ---
 
@@ -980,6 +1016,9 @@ definição, e o `immersive-ar` funciona de verdade ali.
 |---|---|---|
 | Botão nunca habilita | `caps.recommended === null` | Inspecione `caps.reason` e os campos do relatório: quase sempre é `secureContext: false` |
 | "A câmera só funciona em páginas HTTPS" | Página servida por IP ou `http://` | Use um túnel HTTPS ou `localhost` |
+| A mudança do `npm run build` não aparece no celular | Bundle antigo em cache — o Apache do XAMPP não manda `no-store` | Sirva com `npm run mobile`, ou recarregue limpando o cache |
+| `502` / `error 1033` na URL do túnel | O `cloudflared` subiu antes do servidor local | O `npm run mobile` já ordena isso; com dois terminais, suba o `npm run serve` primeiro |
+| A URL do túnel parou de funcionar | *Quick tunnel* é efêmero: cai ao fechar o terminal | Rode de novo — a URL é sempre nova |
 | Imagem não carrega / tela sem arte | CDN sem `Access-Control-Allow-Origin` | Configure o CORS. A lib detecta o caso e escreve a explicação no console |
 | `SECURITY_ERR` ao tirar foto | Marca d'água desenhada de um `<img>` sem `crossOrigin` | Adicione `crossOrigin="anonymous"` na imagem da marca d'água |
 | Quadro pequeno ou grande demais no iPhone | O FOV assumido não bate com a lente do aparelho | Meça com fita métrica e calibre `options.assumedCameraFovH` (padrão 68°) |

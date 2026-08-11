@@ -18,6 +18,9 @@
     "format": "biome check --write .",
     "size": "npm run size -w webar-frame-viewer",
     "ex:next": "npm run dev -w example-nextjs",
+    "serve": "node scripts/dev-server.mjs",
+    "mobile": "node scripts/dev-tunnel.mjs",
+    "tunnel": "cloudflared tunnel --url http://localhost:8080",
     "tunnel:xampp": "cloudflared tunnel --url http://localhost:80",
     "tunnel:next": "cloudflared tunnel --url http://localhost:3000",
     "check:pkg": "npm pack --dry-run -w webar-frame-viewer"

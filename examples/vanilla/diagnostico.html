@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>webar-frame-viewer — diagnóstico</title>
+    <script src="../../packages/webar-frame-viewer/dist/frame-viewer.umd.min.js"></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f14;
+        --card: #151b23;
+        --line: #263140;
+        --fg: #e6edf3;
+        --dim: #8b98a5;
+        --ok: #2ea043;
+        --bad: #f85149;
+        --warn: #d29922;
+        /* Acima do overlay da lib (2147483000): a barra de QA e o log precisam
+           continuar acessíveis durante a sessão AR. */
+        --over: 2147483600;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px 16px 64px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        max-width: 40rem;
+        margin-inline: auto;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--dim);
+        margin: 0 0 10px;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        margin-top: 14px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      td {
+        padding: 4px 0;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      td:first-child {
+        color: var(--dim);
+        width: 42%;
+      }
+      td:last-child {
+        font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        word-break: break-word;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .bad {
+        color: var(--bad);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .grid > .full {
+        grid-column: 1 / -1;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      label > span {
+        display: block;
+        margin-bottom: 3px;
+      }
+      input,
+      select {
+        width: 100%;
+        padding: 8px;
+        background: #0d1117;
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+      }
+      input[type='checkbox'] {
+        width: auto;
+        margin-right: 8px;
+        transform: scale(1.3);
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+        color: var(--fg);
+        min-height: 40px;
+      }
+      .fieldset-title {
+        grid-column: 1 / -1;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--dim);
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+        margin-top: 2px;
+      }
+      button {
+        padding: 10px 14px;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #21262d;
+        color: var(--fg);
+        font: inherit;
+        font-weight: 600;
+      }
+      button.primary {
+        background: var(--ok);
+        border-color: var(--ok);
+        color: #fff;
+      }
+      button.danger {
+        background: #3d1618;
+        border-color: #6e2226;
+      }
+      button:disabled {
+        opacity: 0.45;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .row > button {
+        flex: 1 1 auto;
+      }
+      #preview {
+        width: 100%;
+        border-radius: 8px;
+        display: block;
+      }
+      .banner {
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 13px;
+        margin-top: 10px;
+      }
+      .banner.bad {
+        background: #3d1618;
+        color: #ffb4b0;
+      }
+      .banner.ok {
+        background: #12261a;
+        color: #7ee2a0;
+      }
+
+      /* --- barra de QA e log: sobrevivem por cima do overlay da lib --- */
+      #qabar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: var(--over);
+        display: none;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px 6px;
+        background: rgba(11, 15, 20, 0.92);
+        backdrop-filter: blur(6px);
+      }
+      #qabar.on {
+        display: flex;
+      }
+      #qabar button {
+        flex: 0 0 auto;
+        min-height: 38px;
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .badge {
+        align-self: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #21262d;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+      }
+      #drawer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: var(--over);
+        background: rgba(11, 15, 20, 0.95);
+        border-top: 1px solid var(--line);
+        backdrop-filter: blur(6px);
+      }
+      #drawerbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 8px calc(env(safe-area-inset-bottom, 0px) + 6px);
+      }
+      #drawerbar button {
+        min-height: 36px;
+        padding: 6px 12px;
+        font-size: 12px;
+      }
+      #log {
+        display: none;
+        margin: 0;
+        padding: 8px;
+        height: 42vh;
+        overflow: auto;
+        font: 11px/1.4 ui-monospace, 'Cascadia Code', Consolas, monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-bottom: 1px solid var(--line);
+      }
+      #drawer.open #log {
+        display: block;
+      }
+      #log b {
+        color: var(--dim);
+        font-weight: 400;
+      }
+      .l-event {
+        color: #79c0ff;
+      }
+      .l-error {
+        color: var(--bad);
+      }
+      .l-warn {
+        color: var(--warn);
+      }
+      .l-ok {
+        color: var(--ok);
+      }
+      .l-act {
+        color: #d2a8ff;
+      }
+      ol.checklist {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 13px;
+        color: var(--dim);
+      }
+      ol.checklist li {
+        margin-bottom: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>webar-frame-viewer — diagnóstico</h1>
+    <p style="color: var(--dim); margin: 0; font-size: 13px">
+      Página de QA. Todo evento, hint e erro da sessão aparece no log de baixo — sem DevTools.
+    </p>
+
+    <section>
+      <h2>Ambiente</h2>
+      <table id="env"></table>
+      <div id="verdict" class="banner">Detectando…</div>
+      <div class="row" style="margin-top: 10px">
+        <button type="button" id="redetect">Redetectar</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Arte</h2>
+      <img id="preview" alt="Prévia da arte" />
+      <label style="margin-top: 10px">
+        <span>Usar a sua própria imagem</span>
+        <input id="arquivo" type="file" accept="image/*" />
+      </label>
+    </section>
+
+    <section>
+      <h2>Configuração</h2>
+      <div class="grid" id="form"></div>
+      <div class="row" style="margin-top: 12px">
+        <button type="button" id="reset-cfg">Restaurar padrões</button>
+        <button type="button" id="share-cfg">Copiar link desta config</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sessão</h2>
+      <div class="row">
+        <button type="button" id="start" class="primary" disabled>Iniciar sessão AR</button>
+      </div>
+      <p style="color: var(--dim); font-size: 12px; margin: 10px 0 0">
+        Com a sessão aberta, a barra de controles fica no topo, por cima do overlay.
+      </p>
+      <div id="root"></div>
+    </section>
+
+    <section>
+      <h2>Roteiro de verificação</h2>
+      <ol class="checklist">
+        <li>Ambiente: <code>secureContext</code>, <code>webgl</code> e <code>immersiveAR</code> em ✅ e <code>recommended: webxr</code>.</li>
+        <li>Engine <em>auto</em> → evento <code>engine: webxr</code>, hints <code>scan</code> → <code>aim-wall</code> → <code>tap-to-place</code>; tocar na parede → <code>placed</code> com <code>source: hit-test</code>.</li>
+        <li>Medir com fita a largura do quadro projetado e comparar com <code>widthCm</code>. É a única validação real de escala.</li>
+        <li>Forçar <code>passthrough</code>: arrastar move, pinçar ajusta distância, <code>placed</code> com <code>source: manual</code>.</li>
+        <li>Apontar para parede lisa por mais de <code>noHitTimeoutMs</code> → hint <code>no-wall-found</code> e painel manual.</li>
+        <li><code>capture()</code> deve devolver um Blob e abrir o share sheet pelo botão 📷 do overlay.</li>
+        <li>Negar a permissão de câmera → erro <code>CAMERA_DENIED</code> com mensagem em pt-BR.</li>
+        <li><code>destroy()</code> e iniciar de novo, duas vezes, sem degradar.</li>
+      </ol>
+    </section>
+
+    <div id="qabar">
+      <span class="badge" id="b-status">idle</span>
+      <span class="badge" id="b-engine">—</span>
+      <button type="button" data-act="start">start</button>
+      <button type="button" data-act="pause">pause</button>
+      <button type="button" data-act="resume">resume</button>
+      <button type="button" data-act="place">place</button>
+      <button type="button" data-act="reset">reset</button>
+      <button type="button" data-act="capture">capture</button>
+      <button type="button" data-act="swap">setProduct</button>
+      <button type="button" data-act="destroy" class="danger">destroy</button>
+    </div>
+
+    <div id="drawer">
+      <pre id="log"></pre>
+      <div id="drawerbar">
+        <button type="button" id="toggle-log">Log ▲</button>
+        <span class="badge" id="counter">0</span>
+        <button type="button" id="copy-log">Copiar</button>
+        <button type="button" id="clear-log">Limpar</button>
+      </div>
+    </div>
+
+    <script>
+      // ---------------------------------------------------------------- log
+      const logEl = document.getElementById('log');
+      const counterEl = document.getElementById('counter');
+      const drawer = document.getElementById('drawer');
+      const lines = [];
+      let t0 = performance.now();
+
+      function log(kind, text) {
+        const dt = Math.round(performance.now() - t0);
+        const stamp = `+${String(dt).padStart(5, ' ')}ms`;
+        lines.push(`${stamp} ${text}`);
+        const row = document.createElement('div');
+        row.className = `l-${kind}`;
+        const b = document.createElement('b');
+        b.textContent = `${stamp} `;
+        row.append(b, document.createTextNode(text));
+        logEl.append(row);
+        logEl.scrollTop = logEl.scrollHeight;
+        counterEl.textContent = String(lines.length);
+      }
+
+      function fmt(value) {
+        if (value === undefined) return 'undefined';
+        if (typeof value === 'string') return value;
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return String(value);
+        }
+      }
+
+      // Capturar o console é o ponto da página: no celular não há onde ler.
+      for (const level of ['log', 'info', 'warn', 'error']) {
+        const original = console[level].bind(console);
+        console[level] = (...args) => {
+          log(level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'event',
+            `console.${level} ${args.map(fmt).join(' ')}`);
+          original(...args);
+        };
+      }
+      window.addEventListener('error', (ev) => {
+        log('error', `window.onerror ${ev.message} @ ${ev.filename}:${ev.lineno}`);
+      });
+      window.addEventListener('unhandledrejection', (ev) => {
+        log('error', `unhandledrejection ${fmt(ev.reason?.message ?? ev.reason)}`);
+      });
+
+      document.getElementById('toggle-log').addEventListener('click', (ev) => {
+        drawer.classList.toggle('open');
+        ev.currentTarget.textContent = drawer.classList.contains('open') ? 'Log ▼' : 'Log ▲';
+      });
+      document.getElementById('clear-log').addEventListener('click', () => {
+        lines.length = 0;
+        logEl.replaceChildren();
+        counterEl.textContent = '0';
+      });
+      document.getElementById('copy-log').addEventListener('click', async () => {
+        const text = lines.join('\n');
+        try {
+          await navigator.clipboard.writeText(text);
+          log('ok', 'log copiado para a área de transferência');
+        } catch {
+          // clipboard exige gesto + permissão; a seleção manual sempre funciona.
+          const area = document.createElement('textarea');
+          area.value = text;
+          document.body.append(area);
+          area.select();
+          document.execCommand('copy');
+          area.remove();
+          log('ok', 'log copiado (fallback)');
+        }
+      });
+
+      // ------------------------------------------------------------- arte
+      // Gerada no navegador: funciona offline e sem CORS de CDN nenhum.
+      function arteDemo(paleta) {
+        const c = document.createElement('canvas');
+        c.width = 800;
+        c.height = 1000;
+        const ctx = c.getContext('2d');
+        const g = ctx.createLinearGradient(0, 0, 800, 1000);
+        g.addColorStop(0, paleta[0]);
+        g.addColorStop(0.5, paleta[1]);
+        g.addColorStop(1, paleta[2]);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 800, 1000);
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < 40; i++) {
+          ctx.beginPath();
+          ctx.arc(Math.random() * 800, Math.random() * 1000, Math.random() * 90 + 10, 0, 7);
+          ctx.fill();
+        }
+        // Grade de referência: ajuda a enxergar distorção quando fit = stretch.
+        ctx.globalAlpha = 0.35;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        for (let x = 0; x <= 800; x += 100) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, 1000);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= 1000; y += 100) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(800, y);
+          ctx.stroke();
+        }
+        return c.toDataURL('image/jpeg', 0.9);
+      }
+
+      const ARTE_A = arteDemo(['#0f172a', '#7c3aed', '#f59e0b']);
+      const ARTE_B = arteDemo(['#082f49', '#0d9488', '#fda4af']);
+      let imageUrl = ARTE_A;
+      const preview = document.getElementById('preview');
+      preview.src = imageUrl;
+
+      document.getElementById('arquivo').addEventListener('change', (ev) => {
+        const file = ev.target.files?.[0];
+        if (!file) return;
+        imageUrl = URL.createObjectURL(file);
+        preview.src = imageUrl;
+        log('act', `arte trocada: ${file.name} (${Math.round(file.size / 1024)} KB)`);
+      });
+
+      // ------------------------------------------------------- configuração
+      // Os padrões espelham resolveOptions() em core/options.ts.
+      const FIELDS = [
+        { group: 'Produto' },
+        { key: 'title', label: 'title', type: 'text', def: 'Quadro Abstrato 50 × 70' },
+        { key: 'widthCm', label: 'widthCm', type: 'number', def: 50, step: 1 },
+        { key: 'heightCm', label: 'heightCm', type: 'number', def: 70, step: 1 },
+        { key: 'depthCm', label: 'depthCm', type: 'number', def: 3, step: 0.5 },
+
+        { group: 'Sessão' },
+        {
+          key: 'engine',
+          label: 'engine (forçar)',
+          type: 'select',
+          def: '',
+          options: [['', 'auto'], ['webxr', 'webxr'], ['passthrough', 'passthrough']],
+        },
+        {
+          key: 'locale',
+          label: 'locale',
+          type: 'select',
+          def: 'pt-BR',
+          options: [['pt-BR', 'pt-BR'], ['en', 'en']],
+        },
+        { key: 'autoStart', label: 'autoStart', type: 'checkbox', def: false },
+        { key: 'autoPlaceOnPlane', label: 'autoPlaceOnPlane', type: 'checkbox', def: true },
+        { key: 'allowRotate', label: 'allowRotate', type: 'checkbox', def: true },
+        { key: 'allowScale', label: 'allowScale', type: 'checkbox', def: true },
+
+        { group: 'Heurísticas' },
+        { key: 'assumedCameraFovH', label: 'assumedCameraFovH', type: 'number', def: 68, step: 1 },
+        { key: 'assumedWallDistanceM', label: 'assumedWallDistanceM', type: 'number', def: 2, step: 0.1 },
+        { key: 'noHitTimeoutMs', label: 'noHitTimeoutMs', type: 'number', def: 6000, step: 500 },
+        { key: 'wallToleranceDeg', label: 'wallToleranceDeg', type: 'number', def: 15, step: 1 },
+
+        { group: 'Moldura' },
+        {
+          key: 'fit',
+          label: 'frame.fit',
+          type: 'select',
+          def: 'contain',
+          options: [['contain', 'contain'], ['cover', 'cover'], ['stretch', 'stretch']],
+        },
+        {
+          key: 'shadow',
+          label: 'frame.shadow',
+          type: 'select',
+          def: 'soft',
+          options: [['soft', 'soft'], ['none', 'none']],
+        },
+        { key: 'frameWidthCm', label: 'frame.frameWidthCm', type: 'number', def: 2, step: 0.5 },
+        { key: 'matCm', label: 'frame.matCm', type: 'number', def: 0, step: 0.5 },
+        { key: 'frameColor', label: 'frame.frameColor', type: 'color', def: '#2b2118' },
+        { key: 'matColor', label: 'frame.matColor', type: 'color', def: '#f4f1ea' },
+      ];
+
+      const DEFAULTS = Object.fromEntries(
+        FIELDS.filter((f) => f.key).map((f) => [f.key, f.def]),
+      );
+      const STORAGE_KEY = 'webar-diagnostico-cfg';
+      const formEl = document.getElementById('form');
+
+      for (const field of FIELDS) {
+        if (field.group) {
+          const title = document.createElement('div');
+          title.className = 'fieldset-title';
+          title.textContent = field.group;
+          formEl.append(title);
+          continue;
+        }
+        const label = document.createElement('label');
+        if (field.type === 'checkbox') {
+          label.className = 'check';
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.id = `f-${field.key}`;
+          label.append(input, document.createTextNode(field.label));
+        } else {
+          const span = document.createElement('span');
+          span.textContent = field.label;
+          const input =
+            field.type === 'select'
+              ? document.createElement('select')
+              : document.createElement('input');
+          input.id = `f-${field.key}`;
+          if (field.type === 'select') {
+            for (const [value, text] of field.options) {
+              const opt = document.createElement('option');
+              opt.value = value;
+              opt.textContent = text;
+              input.append(opt);
+            }
+          } else {
+            input.type = field.type;
+            if (field.step) input.step = String(field.step);
+          }
+          label.append(span, input);
+          if (field.key === 'title') label.classList.add('full');
+        }
+        formEl.append(label);
+      }
+
+      function readForm() {
+        const cfg = {};
+        for (const field of FIELDS) {
+          if (!field.key) continue;
+          const input = document.getElementById(`f-${field.key}`);
+          cfg[field.key] =
+            field.type === 'checkbox'
+              ? input.checked
+              : field.type === 'number'
+                ? Number(input.value)
+                : input.value;
+        }
+        return cfg;
+      }
+
+      function writeForm(cfg) {
+        for (const field of FIELDS) {
+          if (!field.key) continue;
+          const input = document.getElementById(`f-${field.key}`);
+          const value = cfg[field.key] ?? field.def;
+          if (field.type === 'checkbox') input.checked = Boolean(value);
+          else input.value = String(value);
+        }
+      }
+
+      function saveCfg() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(readForm()));
+        } catch {
+          // Modo anônimo com storage bloqueado não deve derrubar a página.
+        }
+      }
+
+      function loadCfg() {
+        // A query string vence o localStorage: é ela que carrega um cenário
+        // específico para o celular sem redigitar em teclado virtual.
+        const raw = new URL(location.href).searchParams.get('cfg');
+        if (raw) {
+          try {
+            return { ...DEFAULTS, ...JSON.parse(decodeURIComponent(raw)) };
+          } catch {
+            log('warn', 'query ?cfg= inválida, usando localStorage');
+          }
+        }
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) return { ...DEFAULTS, ...JSON.parse(stored) };
+        } catch {
+          // idem
+        }
+        return { ...DEFAULTS };
+      }
+
+      writeForm(loadCfg());
+      formEl.addEventListener('change', saveCfg);
+
+      document.getElementById('reset-cfg').addEventListener('click', () => {
+        writeForm(DEFAULTS);
+        saveCfg();
+        log('act', 'configuração restaurada aos padrões');
+      });
+
+      document.getElementById('share-cfg').addEventListener('click', async () => {
+        const url = new URL(location.href);
+        url.searchParams.set('cfg', encodeURIComponent(JSON.stringify(readForm())));
+        try {
+          await navigator.clipboard.writeText(url.href);
+          log('ok', 'link copiado');
+        } catch {
+          log('warn', url.href);
+        }
+      });
+
+      function buildProduct(cfg, url) {
+        return {
+          id: 'diag-001',
+          title: cfg.title,
+          imageUrl: url,
+          widthCm: cfg.widthCm,
+          heightCm: cfg.heightCm,
+          depthCm: cfg.depthCm,
+        };
+      }
+
+      function buildOptions(cfg) {
+        return {
+          engine: cfg.engine || undefined,
+          locale: cfg.locale,
+          autoStart: cfg.autoStart,
+          autoPlaceOnPlane: cfg.autoPlaceOnPlane,
+          allowRotate: cfg.allowRotate,
+          allowScale: cfg.allowScale,
+          assumedCameraFovH: cfg.assumedCameraFovH,
+          assumedWallDistanceM: cfg.assumedWallDistanceM,
+          noHitTimeoutMs: cfg.noHitTimeoutMs,
+          wallToleranceDeg: cfg.wallToleranceDeg,
+          frame: {
+            fit: cfg.fit,
+            shadow: cfg.shadow,
+            frameWidthCm: cfg.frameWidthCm,
+            matCm: cfg.matCm,
+            frameColor: cfg.frameColor,
+            matColor: cfg.matColor,
+          },
+        };
+      }
+
+      // ---------------------------------------------------------- ambiente
+      const envEl = document.getElementById('env');
+      const verdictEl = document.getElementById('verdict');
+      const startBtn = document.getElementById('start');
+
+      function addRow(label, value, cls) {
+        const tr = envEl.insertRow();
+        tr.insertCell().textContent = label;
+        const cell = tr.insertCell();
+        cell.textContent = value;
+        if (cls) cell.className = cls;
+      }
+
+      function flag(value) {
+        return value ? ['✅ true', 'ok'] : ['❌ false', 'bad'];
+      }
+
+      async function detectar() {
+        envEl.replaceChildren();
+        addRow('userAgent', navigator.userAgent);
+        addRow('location', `${location.protocol}//${location.host}`);
+        addRow('tela', `${screen.width}×${screen.height} @ dpr ${devicePixelRatio}`);
+        addRow('lib carregada', ...flag(typeof window.FrameViewer === 'object'));
+
+        if (typeof window.FrameViewer !== 'object') {
+          verdictEl.className = 'banner bad';
+          verdictEl.textContent =
+            'O bundle UMD não carregou. Rode `npm run build` e sirva a RAIZ do repositório.';
+          return;
+        }
+
+        const caps = await window.FrameViewer.isSupported();
+        log('event', `capabilities ${fmt(caps)}`);
+
+        for (const key of [
+          'secureContext',
+          'webgl',
+          'getUserMedia',
+          'immersiveAR',
+          'isAndroid',
+          'isIOS',
+        ]) {
+          addRow(key, ...flag(caps[key]));
+        }
+        addRow('inAppBrowser', String(caps.inAppBrowser), caps.inAppBrowser ? 'bad' : 'ok');
+        addRow('recommended', String(caps.recommended), caps.recommended ? 'ok' : 'bad');
+        addRow('reason', String(caps.reason ?? '—'), caps.reason ? 'warn' : '');
+
+        startBtn.disabled = !caps.recommended;
+        if (caps.recommended) {
+          verdictEl.className = 'banner ok';
+          verdictEl.textContent =
+            caps.recommended === 'webxr'
+              ? 'WebXR disponível: hit-test em parede e escala física real.'
+              : 'Modo passthrough: câmera + giroscópio, posicionamento manual.';
+        } else if (!caps.secureContext) {
+          verdictEl.className = 'banner bad';
+          verdictEl.textContent =
+            'Origem insegura. Câmera e WebXR exigem HTTPS: abra o endereço https:// do túnel ' +
+            '(npm run tunnel) ou use chrome://inspect com port forwarding para localhost.';
+        } else {
+          verdictEl.className = 'banner bad';
+          verdictEl.textContent = `Sem suporte a AR neste aparelho (reason: ${caps.reason}).`;
+        }
+      }
+
+      document.getElementById('redetect').addEventListener('click', () => {
+        log('act', 'redetectar');
+        void detectar();
+      });
+      void detectar();
+
+      // ------------------------------------------------------------ sessão
+      const qabar = document.getElementById('qabar');
+      const bStatus = document.getElementById('b-status');
+      const bEngine = document.getElementById('b-engine');
+      let viewer = null;
+      let usandoArteB = false;
+
+      function bind(v) {
+        // Assinar antes de start(): 'status: loading' e falhas precoces de
+        // capability já são emitidas dentro da própria chamada.
+        v.on('status', (s) => {
+          bStatus.textContent = s;
+          log('event', `status → ${s}`);
+        });
+        v.on('engine', (k) => {
+          bEngine.textContent = k;
+          log('ok', `engine → ${k}`);
+        });
+        v.on('hint', (h) => log('event', `hint → ${h}`));
+        v.on('placed', (info) =>
+          log(
+            'ok',
+            `placed source=${info.source} dist=${info.distanceMeters.toFixed(2)}m ` +
+              `pos=(${info.position.x.toFixed(2)}, ${info.position.y.toFixed(2)}, ${info.position.z.toFixed(2)})`,
+          ),
+        );
+        v.on('unplaced', () => log('event', 'unplaced'));
+        v.on('error', (err) =>
+          log('error', `ERRO ${err.code} recoverable=${err.recoverable} — ${err.userMessage}`),
+        );
+        v.on('close', () => {
+          log('act', 'close (a lib destrói o viewer em seguida)');
+          viewer = null;
+          qabar.classList.remove('on');
+          bEngine.textContent = '—';
+        });
+      }
+
+      startBtn.addEventListener('click', () => {
+        if (viewer) return;
+        const cfg = readForm();
+        t0 = performance.now();
+        drawer.classList.add('open');
+        document.getElementById('toggle-log').textContent = 'Log ▼';
+        log('act', `create(${fmt({ engine: cfg.engine || 'auto', locale: cfg.locale })})`);
+
+        viewer = window.FrameViewer.create({
+          container: document.getElementById('root'),
+          product: buildProduct(cfg, imageUrl),
+          options: buildOptions(cfg),
+        });
+        bind(viewer);
+        qabar.classList.add('on');
+        if (!cfg.autoStart) {
+          log('act', 'start()');
+          void viewer.start();
+        } else {
+          log('act', 'autoStart: a lib chama start() sozinha');
+        }
+      });
+
+      const ACOES = {
+        start: () => viewer.start(),
+        pause: () => viewer.pause(),
+        resume: () => viewer.resume(),
+        place: () => viewer.place(),
+        reset: () => viewer.reset(),
+        capture: async () => {
+          const blob = await viewer.capture();
+          log(
+            blob ? 'ok' : 'warn',
+            blob
+              ? `capture → ${blob.type} ${Math.round(blob.size / 1024)} KB`
+              : 'capture → null (engine não suporta: WebXR nunca suporta)',
+          );
+        },
+        swap: async () => {
+          usandoArteB = !usandoArteB;
+          imageUrl = usandoArteB ? ARTE_B : ARTE_A;
+          preview.src = imageUrl;
+          await viewer.setProduct(buildProduct(readForm(), imageUrl));
+          log('ok', `setProduct → arte ${usandoArteB ? 'B' : 'A'}`);
+        },
+        destroy: async () => {
+          await viewer.destroy();
+          viewer = null;
+          qabar.classList.remove('on');
+          bEngine.textContent = '—';
+          log('act', 'destroy() concluído');
+        },
+      };
+
+      qabar.addEventListener('click', (ev) => {
+        const act = ev.target.dataset?.act;
+        if (!act || !viewer) return;
+        log('act', `${act}()`);
+        try {
+          const result = ACOES[act]();
+          if (result?.catch) result.catch((err) => log('error', `${act} lançou: ${fmt(err?.message)}`));
+        } catch (err) {
+          log('error', `${act} lançou: ${fmt(err?.message)}`);
+        }
+      });
+
+      log('ok', 'diagnóstico pronto');
+    </script>
+  </body>
+</html>
