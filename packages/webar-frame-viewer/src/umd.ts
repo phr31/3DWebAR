@@ -1,6 +1,7 @@
 import { ARController, type ViewerConfig } from './core/ARController';
 import { detectCapabilities } from './core/capabilities';
 import { provideThree, setDefaultThreeLoader, type ThreeNS } from './core/loadThree';
+import { createViewer } from './vanilla/createViewer';
 
 /** Manter em sincronia com o range de `peerDependencies.three`. */
 const THREE_VERSION = '0.185.1';
@@ -18,7 +19,7 @@ setDefaultThreeLoader(
 );
 
 // Só named exports: `export default` faria `window.FrameViewer.default.create(...)`.
-export const create = (config: ViewerConfig): ARController => ARController.create(config);
+export const create = (config: ViewerConfig): ARController => createViewer(config);
 export const isSupported = detectCapabilities;
 export { userMessage } from './core/errors';
 export { ARController, provideThree };

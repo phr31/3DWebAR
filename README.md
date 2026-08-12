@@ -22,10 +22,10 @@
 - [Instalação](#instalação)
 - [Guia de uso](#guia-de-uso)
   - [Vanilla / `<script>` (UMD)](#1-vanilla--script-umd)
-  - [ESM / bundler](#2-esm--bundler)
+  - [ESM / bundler (React)](#2-esm--bundler-react)
   - [React e Next.js](#3-react-e-nextjs)
   - [Esconder o botão quando não há suporte](#4-esconder-o-botão-quando-não-há-suporte)
-  - [Ciclo de vida](#5-ciclo-de-vida)
+  - [Ciclo de vida (UMD)](#5-ciclo-de-vida-umd)
 - [Referência da API](#referência-da-api)
 - [Personalização visual](#personalização-visual)
 - [Textos e idiomas](#textos-e-idiomas)
@@ -61,8 +61,8 @@ escolher. Tudo dentro do navegador: sem app, sem QR code, sem marcador impresso.
 | 📱 **Dois engines automáticos** | WebXR onde existe; passthrough por `getUserMedia` no resto (todo iPhone) |
 | 🎛️ **Interface pronta** | Overlay completo, acessível, com estados, dicas contextuais e textos em pt-BR/en |
 | 📷 **Foto para compartilhar** | Compõe vídeo + WebGL num JPEG e chama a *share sheet* nativa |
-| 🛡️ **Erros tratados** | 16 códigos de erro com mensagem pronta para o usuário final |
-| 🪶 **Leve e SSR-safe** | ≤ 60 KB gzip; `three` carregado sob demanda, nunca no bundle inicial |
+| 🛡️ **Erros tratados** | 15 códigos de erro com mensagem pronta para o usuário final |
+| 🪶 **Leve e SSR-safe** | Componente React sob `next/dynamic`; bundle CDN de 15,8 KB gzip com `three` sob demanda |
 
 ---
 
@@ -94,7 +94,7 @@ escolher. Tudo dentro do navegador: sem app, sem QR code, sem marcador impresso.
 
 ```tsx
 'use client';
-import { FrameViewer } from 'webar-frame-viewer/react';
+import { FrameViewer } from 'webar-frame-viewer';
 
 export function Botao({ product }) {
   const [aberto, setAberto] = useState(false);
@@ -145,56 +145,84 @@ export function Botao({ product }) {
 
 ```mermaid
 flowchart TD
-    A["create() — monta o overlay"] --> B{autoStart?}
-    B -- "não (padrão)" --> C["Usuário toca em<br/>'Ver na minha parede'"]
-    B -- sim --> D
-    C --> D["start()"]
-    D --> E["detectCapabilities()"]
-    E --> F{recommended}
-    F -- null --> X["ARError + onError<br/>status: 'error'"]
-    F -- webxr --> G["loadThree() — import dinâmico"]
-    F -- passthrough --> G
-    G --> H["AssetLoader.acquire()<br/>imagem com CORS"]
-    H --> I["FrameBuilder.buildFrame()<br/>moldura + mat + sombra"]
-    I --> J{engine}
-    J -- webxr --> K["WebXRSceneManager<br/>immersive-ar + hit-test"]
-    J -- passthrough --> L["PassthroughSceneManager<br/>getUserMedia + giroscópio"]
+    A["&lt;FrameViewer&gt; monta"] --> B["detectCapabilities()<br/>na montagem, não no clique"]
+    B --> C["useArtTexture → AssetLoader.acquire()"]
+    C --> D["&lt;Canvas&gt; monta<br/>(exigido: enterAR precisa de um &lt;XR&gt; pronto)"]
+    D --> E{autoStart?}
+    E -- "não (padrão)" --> F["Usuário toca em<br/>'Ver na minha parede'"]
+    E -- sim --> G
+    F --> G["start()"]
+    G --> H{recommended}
+    H -- null --> X["ARError + onError<br/>status: 'error'"]
+    H -- webxr --> I["xrStore.enterAR()<br/>no próprio handler do clique"]
+    H -- passthrough --> L
+    I --> K["XRScene<br/>useXRHitTest + useXRAnchor"]
+    I -. "XR_GESTURE_REQUIRED" .-> Y["status: 'idle'<br/>botão reaparece"]
+    I -. "XR_SESSION_FAILED + câmera" .-> L
+    L["PassthroughScene<br/>getUserMedia + giroscópio"]
     K --> M["status: 'placing' → 'placed'"]
     L --> M
-    K -. "falha de sessão XR" .-> L
 ```
+
+O `enterAR()` acontece **dentro do handler do clique**, sem `await` antes dele:
+`requestSession('immersive-ar')` exige *user activation*, e qualquer espera
+assíncrona anterior a queimaria. É por isso que as capacidades são detectadas na
+montagem e o `<Canvas>` já sobe antes do toque.
 
 ### Módulos
 
+O pacote tem **duas montagens sobre um núcleo comum**: a árvore React (entry npm) e
+o núcleo imperativo (entry UMD). A lógica sensível — matemática de hit-test, óptica
+do passthrough, aquisição de câmera — mora em `core/` e é consumida pelas duas, para
+que não exista uma segunda cópia capaz de divergir.
+
 ```
 packages/webar-frame-viewer/src/
-├── index.ts                    entry npm (ESM/CJS) — registra import('three')
-├── umd.ts                      entry CDN — registra o three via jsDelivr
-├── core/
-│   ├── ARController.ts         orquestra tudo; a máquina de estados pública
+├── react/                      ⭐ entry npm — a API pública
+│   ├── index.ts                barril ("use client" vem do banner do tsup)
+│   ├── FrameViewer.tsx         o componente principal
+│   ├── store.ts                estado reativo (useSyncExternalStore, zero deps)
+│   ├── components/
+│   │   ├── ARCanvas.tsx        <Canvas> do R3F + <XR>; NoToneMapping, alpha
+│   │   ├── XRScene.tsx         caminho WebXR: hit-test, âncora, modo manual
+│   │   ├── PassthroughScene.tsx caminho iOS: vídeo + giroscópio + gestos
+│   │   ├── FrameModel.tsx      o quadro 3D, declarativo
+│   │   ├── Reticle.tsx         contorno real do produto (âmbar → verde)
+│   │   └── Overlay.tsx         a interface, com os mesmos data-fv-*
+│   └── hooks/
+│       ├── useAR.ts            engine, ciclo de vida, fallback XR→passthrough
+│       ├── useHitTest.ts       useXRHitTest + histerese de 5 quadros
+│       ├── usePassthrough.ts   getUserMedia + DeviceOrientation + frustum
+│       ├── usePassthroughPlacement.ts  pan / pinça / roll / tap
+│       ├── useCapture.ts       screenshot e compartilhamento
+│       └── useArtTexture.ts    ponte para o AssetLoader (refcount, CORS)
+├── core/                       lógica compartilhada, sem React e sem `three` estático
+│   ├── public.ts               ⭐ entry `/core` — server-safe, sem "use client"
+│   ├── xr/hitTest.ts           filtro de parede, histerese, projeção manual
+│   ├── passthrough/            camera · orientation · frustum · ambient
 │   ├── capabilities.ts         sondas de ambiente (HTTPS, WebGL, XR, webview)
 │   ├── loadThree.ts            único arquivo que menciona `three` fora de `import type`
 │   ├── AssetLoader.ts          cache de texturas com contagem de referências
-│   ├── FrameBuilder.ts         monta a malha 3D do quadro a partir dos centímetros
 │   ├── TransformUtils.ts       matemática: cm→m, fit, normal de parede, base do quadro
 │   ├── GestureController.ts    Pointer Events → pan / pinch / rotate / tap
-│   ├── SceneManager.ts         a interface que os dois engines implementam
 │   ├── capture.ts              compõe vídeo + WebGL em JPEG e compartilha
-│   ├── errors.ts               ARError, 16 códigos, mensagens pt-BR/en
-│   ├── events.ts               Emitter tipado, sem dependências
-│   ├── options.ts              resolveOptions() — a fonte dos valores padrão
-│   ├── types.ts                todos os tipos públicos
-│   └── engines/
-│       ├── WebXRSceneManager.ts        immersive-ar + hit-test + anchors
-│       └── PassthroughSceneManager.ts  getUserMedia + deviceorientation
-├── ui/
-│   ├── overlay.ts              a interface (DOM puro, sem framework)
-│   ├── strings.ts              17 chaves em pt-BR e en
-│   └── injectStyles.ts         injeta o CSS em <head> na primeira montagem
-├── styles/overlay.css
-├── vanilla/createViewer.ts     fábrica da API imperativa
-└── react/                      componente <FrameViewer> ("use client")
+│   ├── errors.ts               ARError, 15 códigos, mensagens pt-BR/en
+│   ├── events.ts · options.ts · types.ts
+│   ├── FrameBuilder.ts         versão imperativa da malha (usada pelo UMD)
+│   ├── ARController.ts         orquestrador imperativo (usado pelo UMD)
+│   ├── SceneManager.ts         a interface que os dois engines implementam
+│   └── engines/                WebXRSceneManager · PassthroughSceneManager (UMD)
+├── umd.ts                      entry CDN — registra o three via jsDelivr
+├── vanilla/createViewer.ts     fábrica da API imperativa (UMD)
+├── ui/                         overlay.ts · strings.ts · injectStyles.ts
+└── styles/overlay.css
 ```
+
+**Por que o UMD não usa React.** Empacotar React + ReactDOM + three + R3F +
+`@react-three/xr` num arquivo de `<script>` daria ~280 KB gzip. O bundle CDN atual
+tem **15,8 KB gzip** e busca o three sob demanda. O orçamento em
+`scripts/size.mjs` existe justamente para que um `import` distraído não apague
+essa diferença.
 
 ### Matriz de recursos por engine
 
@@ -243,32 +271,37 @@ Não há o que capturar. Por isso `canCapture` é `false` e o CSS esconde `.fv-s
 ## Instalação
 
 ```bash
-npm install webar-frame-viewer three
+npm install webar-frame-viewer three react react-dom @react-three/fiber @react-three/xr
 ```
 
-```bash
-pnpm add webar-frame-viewer three
-# ou
-yarn add webar-frame-viewer three
-```
+Para consumo por `<script>` (CDN) não se instala nada: o bundle UMD carrega o
+`three` sozinho e não usa React nem R3F.
 
 ### Peer dependencies
 
 | Pacote | Faixa | Obrigatório? |
 |---|---|---|
-| `three` | `>=0.160.0 <1.0.0` | **Sim** — carregado por `import()` dinâmico, nunca no bundle inicial |
-| `react` | `>=18.0.0` | Opcional — só para o subcaminho `/react` |
-| `react-dom` | `>=18.0.0` | Opcional — só para o subcaminho `/react` |
+| `three` | `>=0.160.0 <1.0.0` | **Sim** |
+| `react` / `react-dom` | `>=18.0.0` | Sim para a API React (entry `.`); dispensável para `/core` |
+| `@react-three/fiber` | `>=9.0.0` | Sim para a API React |
+| `@react-three/xr` | `>=6.0.0` | Sim para a API React |
 
 ### Pontos de entrada
 
 | Import | Arquivo | Conteúdo |
 |---|---|---|
-| `webar-frame-viewer` | `dist/index.mjs` / `.cjs` | API imperativa completa + tipos. **Sem** `"use client"` — seguro no servidor |
-| `webar-frame-viewer/vanilla` | idem acima | Alias explícito do entry principal |
-| `webar-frame-viewer/react` | `dist/react.mjs` / `.cjs` | Componente `<FrameViewer>` com banner `"use client"` |
+| `webar-frame-viewer` | `dist/index.mjs` / `.cjs` | **API React**: `<FrameViewer>`, hooks e componentes. Banner `"use client"` |
+| `webar-frame-viewer/react` | idem acima | Alias explícito do entry principal |
+| `webar-frame-viewer/core` | `dist/core.mjs` / `.cjs` | `detectCapabilities`, tipos e erros. **Sem** `"use client"` — seguro em Server Component |
 | `webar-frame-viewer/styles.css` | `dist/overlay.css` | CSS do overlay, para self-host ou sobrescrita |
-| `webar-frame-viewer/umd` | `dist/frame-viewer.umd.min.js` | Bundle IIFE, global `window.FrameViewer` |
+| `webar-frame-viewer/umd` | `dist/frame-viewer.umd.min.js` | Bundle IIFE, global `window.FrameViewer` — **API imperativa**, sem React |
+
+> **A API imperativa (`ARController`) não é mais exportada pelo npm.** Ela continua
+> viva como motor do build UMD, que é o caminho para quem integra por `<script>`.
+> Em bundler, use a API React. Ver [Guia de uso](#guia-de-uso).
+
+> O CSS é **injetado automaticamente** em `<head>` na primeira montagem. Importar
+> `styles.css` é opcional e só faz sentido se você for hospedar ou substituir o arquivo.
 
 > O CSS é **injetado automaticamente** em `<head>` na primeira montagem. Importar
 > `styles.css` é opcional e só faz sentido se você for hospedar ou substituir o arquivo.
@@ -327,10 +360,15 @@ O global expõe apenas: `create`, `isSupported`, `provideThree`, `userMessage` e
 > para o build local (`../../packages/webar-frame-viewer/dist/frame-viewer.umd.min.js`),
 > então rode `npm run build` antes de abri-lo.
 
-### 2. ESM / bundler
+### 2. ESM / bundler (React)
 
-```ts
-import { createViewer, detectCapabilities, type ProductData } from 'webar-frame-viewer';
+Em bundler o caminho é o componente. Não há mais API imperativa no npm — se você
+precisa dela, use o build UMD descrito acima.
+
+```tsx
+'use client';
+
+import { FrameViewer, type ProductData } from 'webar-frame-viewer';
 
 const product: ProductData = {
   id: 'prod-001',
@@ -339,34 +377,41 @@ const product: ProductData = {
   heightCm: 70,
 };
 
-const caps = await detectCapabilities();
-if (!caps.recommended) throw new Error('dispositivo incompatível');
-
-const viewer = createViewer({
-  container: document.getElementById('ar-root')!,
-  product,
-  options: {
-    locale: 'pt-BR',
-    frame: { frameWidthCm: 3, frameColor: '#1a1a1a', matCm: 5 },
-  },
-});
-
-viewer.on('status', (s) => console.log('estado:', s));
-viewer.on('placed', (info) => console.log('posição:', info.position));
-
-await viewer.start();
+export function Visualizador() {
+  return (
+    <FrameViewer
+      product={product}
+      options={{
+        locale: 'pt-BR',
+        frame: { frameWidthCm: 3, frameColor: '#1a1a1a', matCm: 5 },
+      }}
+      onPlace={(info) => console.log('posição:', info.position)}
+      onClose={() => console.log('fechado')}
+    />
+  );
+}
 ```
 
-`createViewer(config)`, `FrameViewer.create(config)` e `ARController.create(config)`
-são a mesma coisa — use o que ler melhor no seu código.
+O componente monta a experiência inteira: overlay, câmera, cena e gestos. O
+usuário toca em "Ver na minha parede" e o motor certo é escolhido sozinho —
+WebXR no Android, passthrough no iPhone.
 
 ### 3. React e Next.js
 
 ```tsx
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
-import { detectCapabilities, FrameViewer, type ProductData } from 'webar-frame-viewer/react';
+import { detectCapabilities, type ProductData } from 'webar-frame-viewer/core';
+
+// `ssr: false` é obrigatório: o <Canvas> do R3F toca em `window` já na
+// importação. De quebra, three + R3F + @react-three/xr ficam fora do bundle
+// inicial da página de produto e só chegam quando o usuário pede a experiência.
+const FrameViewer = dynamic(
+  () => import('webar-frame-viewer').then((m) => m.FrameViewer),
+  { ssr: false },
+);
 
 export function BotaoAR({ product }: { product: ProductData }) {
   const [suportado, setSuportado] = useState<boolean | null>(null);
@@ -399,16 +444,16 @@ export function BotaoAR({ product }: { product: ProductData }) {
 }
 ```
 
-**Não precisa de `next/dynamic` nem de `ssr: false`.** O componente renderiza uma
-`<div>` vazia no servidor e monta o overlay em `useEffect`, então não existe divergência
-de hidratação. Nenhum *browser global* é tocado em escopo de módulo — todas as sondas
-ficam dentro do corpo de `detectCapabilities()`.
+**`detectCapabilities` vem de `/core`, não do entry principal.** Assim dá para decidir
+se o botão aparece sem baixar o three, o R3F nem o `@react-three/xr` — o subpath
+`/core` é server-safe por construção: não tem `"use client"` e não toca em nenhum
+*browser global* em escopo de módulo (todas as sondas ficam dentro da função).
 
-Na página *Server Component*, importe apenas os tipos:
+Na página *Server Component*, importe apenas os tipos, também de `/core`:
 
 ```tsx
 // app/page.tsx — Server Component
-import type { ProductData } from 'webar-frame-viewer';
+import type { ProductData } from 'webar-frame-viewer/core';
 import { BotaoAR } from './botao-ar';
 
 const product: ProductData = { id: 'prod-001', imageUrl: '/quadro.png', widthCm: 50, heightCm: 70 };
@@ -426,9 +471,10 @@ aparelhos com *notch*:
 export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' as const };
 ```
 
-> **Atenção ao nome `FrameViewer`.** Em `webar-frame-viewer` ele é um **objeto**
-> (`FrameViewer.create`, `FrameViewer.isSupported`). Em `webar-frame-viewer/react` ele é
-> o **componente React**. Não são a mesma exportação.
+> **Atenção ao nome `FrameViewer`.** No pacote npm ele é o **componente React**. No
+> global do bundle UMD (`window.FrameViewer`) ele é um **objeto** com
+> `create()` / `isSupported()`. São superfícies diferentes para consumidores
+> diferentes.
 
 ### 4. Esconder o botão quando não há suporte
 
@@ -447,10 +493,10 @@ if (!caps.recommended) {
 }
 ```
 
-### 5. Ciclo de vida
+### 5. Ciclo de vida (UMD)
 
 ```ts
-const viewer = createViewer({ container, product });
+const viewer = window.FrameViewer.create({ container, product });
 
 await viewer.start();       // abre câmera/sessão XR — exige gesto do usuário
 viewer.status;              // 'placing'
@@ -477,7 +523,7 @@ chama `destroy()` na limpeza do `useEffect`.
 
 ## Referência da API
 
-### `ViewerConfig`
+### `ViewerConfig` — somente no build UMD
 
 ```ts
 interface ViewerConfig {
@@ -486,6 +532,8 @@ interface ViewerConfig {
   options?: ViewerOptions;
 }
 ```
+
+Na API React não existe `container`: o `<FrameViewer>` é o próprio elemento.
 
 ### `ProductData`
 
@@ -547,9 +595,12 @@ interface ViewerConfig {
 Se o recorte descartar mais de 15% da arte, a lib emite um aviso no console:
 `[webar-frame-viewer] fit "cover" descarta 23% da arte de prod-001.`
 
-### `ARController`
+### `ARController` — somente no build UMD
 
-Retornado por `createViewer()`, `FrameViewer.create()` e `ARController.create()`.
+> Esta é a superfície do **global `window.FrameViewer`** do bundle CDN. Ela **não é
+> exportada pelo pacote npm**; em bundler, use [`<FrameViewer>`](#frameviewerprops-react).
+
+Retornado por `window.FrameViewer.create()`.
 
 | Membro | Assinatura | Descrição |
 |---|---|---|
@@ -694,8 +745,9 @@ provideThree(async () => THREE);
 
 Alternativa sem código: `options.threeUrl = 'https://seu-cdn/three.module.js'`.
 
-O *loader* fica em `globalThis`, então `dist/index.mjs` e `dist/react.mjs` compartilham a
-mesma instância mesmo sendo bundles separados. Se uma carga falhar por rede, a promessa
+O *loader* fica em `globalThis`, então bundles separados compartilham a mesma
+instância. Ele só é usado pelo caminho UMD — na API React o `three` é um peer
+dependency importado normalmente pelo R3F. Se uma carga falhar por rede, a promessa
 não é cacheada — um retry na mesma sessão funciona.
 
 ### `preload(three, urls, maxAnisotropy)` e `clearAssets()`
@@ -723,9 +775,17 @@ clearAssets();
 | `onReady` / `onPlace` / `onError` / `onClose` | funções | — |
 | `className` | `string` | Aplicado na `<div>` hospedeira |
 
-**A sessão só é recriada quando `product.id`, `product.imageUrl`, `product.widthCm` ou
-`product.heightCm` mudam.** As demais props são lidas por *ref*, de propósito: incluí-las
-nas dependências derrubaria a sessão de AR a cada re-render do componente pai.
+**Os *callbacks* são lidos por *ref*, de propósito.** Passar `onPlace={() => …}` inline
+não derruba a sessão de AR: se as funções entrassem nas dependências dos efeitos, todo
+re-render do componente pai reabriria a câmera. O mesmo vale para `options`.
+
+A textura é trocada quando `product.imageUrl` muda; as dimensões e o estilo da moldura
+são recalculados por `useMemo` sem tocar na sessão.
+
+Além do componente, o pacote exporta os hooks (`useAR`, `useHitTest`, `usePassthrough`,
+`useCapture`, `useArtTexture`) e os componentes internos (`ARCanvas`, `FrameModel`,
+`Reticle`, `Overlay`, `XRScene`, `PassthroughScene`) para quem precisar montar a própria
+cena. `<FrameModel>` aceita `product`, `art`, `style`, `opacity`, `ambient` e `visible`.
 
 ---
 
@@ -807,11 +867,10 @@ já aplicado nas quatro bordas. O retículo do WebXR é âmbar `#f59e0b` → ver
 `options.locale` aceita `'pt-BR'` (padrão) e `'en'`. Qualquer chave individual pode ser
 sobrescrita por `options.strings`:
 
-```ts
-createViewer({
-  container,
-  product,
-  options: {
+```tsx
+<FrameViewer
+  product={product}
+  options={{
     locale: 'pt-BR',
     strings: {
       start: 'Ver na parede da sala',
@@ -916,14 +975,14 @@ npm run mobile         # os dois acima em um terminal só, já imprimindo a URL 
 
 | # | Nome | Entrada | Saída | Observação |
 |---|---|---|---|---|
-| 1 | `npm` | `src/index.ts` | `index.mjs`, `index.cjs`, `.d.ts`, `.d.cts` | `three` em `external` |
-| 2 | `react` | `src/react/index.ts` | `react.mjs`, `react.cjs`, tipos | Banner `"use client"` |
-| 3 | `umd` | `src/umd.ts` | `frame-viewer.umd.min.js` | IIFE, global `FrameViewer`, minificado |
+| 1 | `react` | `src/react/index.ts` | `index.mjs`, `index.cjs`, tipos | Banner `"use client"`; three, React, R3F e XR em `external` |
+| 2 | `core` | `src/core/public.ts` | `core.mjs`, `core.cjs`, tipos | **Sem** banner — seguro no servidor |
+| 3 | `umd` | `src/umd.ts` | `frame-viewer.umd.min.js` | IIFE, global `FrameViewer`, minificado, sem React |
 | 4 | `css` | `src/styles/overlay.css` | `overlay.css` | Minificado, standalone |
 
-O config do React é separado **só** por causa do banner: se `index` e `react` dividissem
-o mesmo config, o `index.mjs` — que precisa ser seguro no servidor — também ganharia a
-diretiva e viraria uma *client reference* inutilizável.
+O config do `core` é separado **só** por causa do banner: se as duas entradas
+dividissem o mesmo config, o `core.mjs` — que precisa ser seguro no servidor — também
+ganharia a diretiva e viraria uma *client reference* inutilizável.
 
 Alvo `es2020`, plataforma `browser`, *sourcemaps* ativos, `treeshake: false` (o Rollup
 mexeria na diretiva `"use client"`) e `clean: false` (a limpeza acontece no `prebuild`,
@@ -933,14 +992,19 @@ porque configs em array podem rodar em paralelo).
 
 `scripts/size.mjs` falha o build se algum artefato passar do limite (gzip):
 
-| Arquivo | Limite |
-|---|---|
-| `dist/frame-viewer.umd.min.js` | 60 KB |
-| `dist/index.mjs` | 60 KB |
-| `dist/react.mjs` | 65 KB |
+| Arquivo | Limite | Atual |
+|---|---|---|
+| `dist/frame-viewer.umd.min.js` | 60 KB | **15,8 KB** |
+| `dist/index.mjs` | 75 KB | 21,9 KB |
+| `dist/core.mjs` | 30 KB | 4,3 KB |
 
 O orçamento é deliberadamente muito abaixo do critério de aceite de 200 KB: ele falha
 cedo, antes que um `import` estático de `three` entre no bundle sem ninguém perceber.
+
+O limite do UMD é o mais importante dos três e **não deve subir**: ele é o sinal de que
+React, R3F ou `@react-three/xr` não vazaram para o bundle de `<script>`. Os artefatos
+npm ficam pequenos porque `three`, `react`, `react-dom`, `@react-three/fiber` e
+`@react-three/xr` são todos `external` — o consumidor já os tem.
 
 ### Verificações antes de publicar
 

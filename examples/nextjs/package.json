@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@react-three/fiber": "^9.7.0",
+    "@react-three/xr": "^6.6.30",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -1,8 +1,9 @@
-import type { ProductData } from 'webar-frame-viewer';
+import type { ProductData } from 'webar-frame-viewer/core';
 import { ProductAR } from './ar-button';
 
-// Server Component: nada de AR aqui. O import de `webar-frame-viewer` traz só
-// tipos, então nenhum browser global é tocado na renderização do servidor.
+// Server Component: nada de AR aqui. O subpath `/core` é server-safe por
+// construção — não tem a diretiva "use client" e não toca em nenhum global de
+// navegador no escopo do módulo.
 const product: ProductData = {
   id: 'prod-001',
   title: 'Quadro Abstrato 50 × 70',

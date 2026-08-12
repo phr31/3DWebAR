@@ -25,7 +25,17 @@
         "default": "./dist/index.cjs"
       }
     },
-    "./vanilla": {
+    "./core": {
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.mjs"
+      },
+      "require": {
+        "types": "./dist/core.d.cts",
+        "default": "./dist/core.cjs"
+      }
+    },
+    "./react": {
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.mjs"
@@ -33,16 +43,6 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
-      }
-    },
-    "./react": {
-      "import": {
-        "types": "./dist/react.d.ts",
-        "default": "./dist/react.mjs"
-      },
-      "require": {
-        "types": "./dist/react.d.cts",
-        "default": "./dist/react.cjs"
       }
     },
     "./styles.css": "./dist/overlay.css",
@@ -64,11 +64,19 @@
   },
 
   "peerDependencies": {
+    "@react-three/fiber": ">=9.0.0",
+    "@react-three/xr": ">=6.0.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
     "three": ">=0.160.0 <1.0.0"
   },
   "peerDependenciesMeta": {
+    "@react-three/fiber": {
+      "optional": true
+    },
+    "@react-three/xr": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },
@@ -78,6 +86,8 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@react-three/fiber": "^9.7.0",
+    "@react-three/xr": "^6.6.30",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.185.0",

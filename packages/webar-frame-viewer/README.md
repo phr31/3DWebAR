@@ -13,12 +13,11 @@ vivo (`getUserMedia` + Three.js) no resto — inclusive em todo iPhone.
 ## Instalação
 
 ```bash
-npm install webar-frame-viewer three
+npm install webar-frame-viewer three react react-dom @react-three/fiber @react-three/xr
 ```
 
-`three` é *peer dependency* (`>=0.160.0 <1.0.0`) e é carregado por `import()` dinâmico —
-nunca entra no bundle inicial da sua página. `react` e `react-dom` (`>=18`) só são
-necessários para o subcaminho `/react`.
+Todos são *peer dependencies*. Para consumo por `<script>` (CDN) não se instala nada:
+o bundle UMD tem 15,8 KB gzip, busca o `three` sozinho e não usa React nem R3F.
 
 ## Uso
 
@@ -35,30 +34,28 @@ necessários para o subcaminho `/react`.
 </script>
 ```
 
-### ESM / bundler
-
-```ts
-import { createViewer, detectCapabilities } from 'webar-frame-viewer';
-
-const caps = await detectCapabilities();
-if (!caps.recommended) return; // esconda o botão
-
-const viewer = createViewer({ container, product });
-await viewer.start();
-```
+> A API imperativa (`ARController` / `create()`) existe **apenas** no build UMD acima.
+> Em bundler, o caminho é o componente React.
 
 ### React / Next.js
 
 ```tsx
 'use client';
-import { FrameViewer } from 'webar-frame-viewer/react';
+import dynamic from 'next/dynamic';
+import { detectCapabilities } from 'webar-frame-viewer/core';
+
+// `ssr: false` é obrigatório: o <Canvas> do R3F toca em `window` na importação.
+const FrameViewer = dynamic(
+  () => import('webar-frame-viewer').then((m) => m.FrameViewer),
+  { ssr: false },
+);
 
 <FrameViewer product={product} onClose={() => setAberto(false)} />;
 ```
 
-Não precisa de `next/dynamic` nem `ssr: false`: o componente renderiza uma `<div>` vazia
-no servidor e monta o overlay em `useEffect`. O entry `webar-frame-viewer` é seguro no
-servidor; só `webar-frame-viewer/react` carrega a diretiva `"use client"`.
+Use `webar-frame-viewer/core` para checar suporte (`detectCapabilities`) e para os
+tipos: esse subcaminho é *server-safe*, não tem `"use client"` e não arrasta React,
+`three` nem R3F — dá para esconder o botão sem pagar o bundle da experiência.
 
 ## Compatibilidade
 

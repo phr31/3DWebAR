@@ -1,12 +1,25 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
-import { detectCapabilities, FrameViewer, type ProductData } from 'webar-frame-viewer/react';
+import { detectCapabilities, type ProductData } from 'webar-frame-viewer/core';
+
+/**
+ * `ssr: false` é obrigatório: o `FrameViewer` monta um `<Canvas>` do R3F, que
+ * toca em `window` já na importação. Carregar sob demanda também mantém o three,
+ * o R3F e o @react-three/xr fora do bundle inicial da página de produto — eles
+ * só chegam quando o usuário decide ver na parede.
+ */
+const FrameViewer = dynamic(() => import('webar-frame-viewer').then((mod) => mod.FrameViewer), {
+  ssr: false,
+});
 
 export function ProductAR({ product }: { product: ProductData }) {
   const [isOpen, setIsOpen] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
 
+  // `detectCapabilities` vem de `/core`, que é server-safe e não arrasta React
+  // nem three — dá para checar suporte sem pagar o bundle da experiência.
   useEffect(() => {
     void detectCapabilities().then((caps) => setSupported(caps.recommended !== null));
   }, []);

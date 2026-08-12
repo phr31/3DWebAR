@@ -8,17 +8,14 @@ import {
   type SceneManager,
   type SceneMountContext,
 } from '../SceneManager';
-import { isWallNormal, readHitPose, wallBasis } from '../TransformUtils';
-
-/** Frames válidos consecutivos antes de aceitar um alvo. Sem isso o reticle pisca. */
-const STABLE_FRAMES = 5;
-/** Milissegundos sem hit antes de esconder o reticle. */
-const HIT_GRACE_MS = 200;
-/** Além de ~5 m o ARCore está chutando. */
-const MIN_HIT_M = 0.4;
-const MAX_HIT_M = 6;
-/** Folga da parede, evita a peça entrar nela quando a estimativa do plano erra. */
-const WALL_GAP = 0.005;
+import {
+  ambientFromLightEstimate,
+  HitTestTracker,
+  manualCandidate,
+  progressHint,
+  RETICLE_STABLE,
+  RETICLE_UNSTABLE,
+} from '../xr/hitTest';
 
 interface XRSessionInit_ {
   requiredFeatures?: string[];
@@ -72,8 +69,6 @@ export class WebXRSceneManager implements SceneManager {
   private reticleLine: THREE.LineBasicMaterial | null = null;
   private reticleDisposables: Array<THREE.BufferGeometry | THREE.Material> = [];
 
-  private stableCount = 0;
-  private lastHitAt = 0;
   private startedAt = 0;
   private hasCandidate = false;
   private placed = false;
@@ -82,8 +77,8 @@ export class WebXRSceneManager implements SceneManager {
   private endingIntentionally = false;
   private destroyed = false;
 
-  private candidatePosition!: THREE.Vector3;
-  private candidateQuaternion!: THREE.Quaternion;
+  /** Filtro de parede + histerese. Dono do candidato (posição e orientação). */
+  private tracker!: HitTestTracker;
 
   async mount(ctx: SceneMountContext): Promise<void> {
     this.ctx = ctx;
@@ -97,8 +92,7 @@ export class WebXRSceneManager implements SceneManager {
 
     this.scene = new this.three.Scene();
     this.camera = new this.three.PerspectiveCamera(60, 1, 0.05, 100);
-    this.candidatePosition = new this.three.Vector3();
-    this.candidateQuaternion = new this.three.Quaternion();
+    this.tracker = new HitTestTracker(this.three);
 
     this.canvas.addEventListener('webglcontextlost', this.onContextLost);
     // Sem isto, tocar num botão do overlay também dispara `select` na sessão e o
@@ -188,12 +182,12 @@ export class WebXRSceneManager implements SceneManager {
 
     const camera = this.renderer.xr.getCamera();
     this.ctx.emit('placed', {
-      distanceMeters: this.candidatePosition.distanceTo(camera.position),
+      distanceMeters: this.tracker.distanceTo(camera.position),
       source: this.manualMode ? 'manual' : 'hit-test',
       position: {
-        x: this.candidatePosition.x,
-        y: this.candidatePosition.y,
-        z: this.candidatePosition.z,
+        x: this.tracker.position.x,
+        y: this.tracker.position.y,
+        z: this.tracker.position.z,
       },
     });
     this.ctx.emit('hint', 'placed');
@@ -202,10 +196,11 @@ export class WebXRSceneManager implements SceneManager {
   reset(): void {
     this.placed = false;
     this.anchor = null;
-    this.stableCount = 0;
+    this.tracker.reset();
     this.hasCandidate = false;
     this.noWallNotified = false;
     this.startedAt = performance.now();
+    if (this.reticleLine) this.reticleLine.color.setHex(RETICLE_UNSTABLE);
     this.frame?.setOpacity(this.ctx.options.autoPlaceOnPlane ? 0.85 : 1);
     if (this.frame) this.frame.group.visible = false;
     this.ctx.emit('unplaced', undefined);
@@ -281,7 +276,10 @@ export class WebXRSceneManager implements SceneManager {
       new this.three.Vector3(-w / 2, h / 2, 0),
     ];
     const lineGeo = new this.three.BufferGeometry().setFromPoints(points);
-    const lineMat = new this.three.LineBasicMaterial({ color: 0xf59e0b, depthTest: false });
+    const lineMat = new this.three.LineBasicMaterial({
+      color: RETICLE_UNSTABLE,
+      depthTest: false,
+    });
     const line = new this.three.LineLoop(lineGeo, lineMat);
     line.renderOrder = 1000;
 
@@ -317,15 +315,15 @@ export class WebXRSceneManager implements SceneManager {
       session.requestAnimationFrame((_time, xrFrame) => {
         const rigid = new XRRigidTransform(
           {
-            x: this.candidatePosition.x,
-            y: this.candidatePosition.y,
-            z: this.candidatePosition.z,
+            x: this.tracker.position.x,
+            y: this.tracker.position.y,
+            z: this.tracker.position.z,
           },
           {
-            x: this.candidateQuaternion.x,
-            y: this.candidateQuaternion.y,
-            z: this.candidateQuaternion.z,
-            w: this.candidateQuaternion.w,
+            x: this.tracker.quaternion.x,
+            y: this.tracker.quaternion.y,
+            z: this.tracker.quaternion.z,
+            w: this.tracker.quaternion.w,
           },
         );
         (
@@ -349,8 +347,7 @@ export class WebXRSceneManager implements SceneManager {
     const estimate = (xrFrame as FrameWithEstimate).getLightEstimate?.(this.lightProbe);
     const intensity = estimate?.primaryLightIntensity;
     if (!intensity) return;
-    const luminance = 0.2126 * intensity.x + 0.7152 * intensity.y + 0.0722 * intensity.z;
-    this.frame.setAmbient(0.55 + Math.min(1, luminance / 3) * 0.45);
+    this.frame.setAmbient(ambientFromLightEstimate(intensity.x, intensity.y, intensity.z));
   }
 
   private updateFromAnchor(xrFrame: XRFrame, space: XRReferenceSpace): boolean {
@@ -366,22 +363,18 @@ export class WebXRSceneManager implements SceneManager {
   private updateManual(): void {
     if (!this.frame) return;
     const camera = this.renderer.xr.getCamera();
-    const forward = new this.three.Vector3();
-    camera.getWorldDirection(forward);
-
-    // Normal apontando de volta para o usuário, forçada em prumo (só yaw).
-    const quaternion = wallBasis(this.three, -forward.x, 0, -forward.z);
-    if (quaternion) this.candidateQuaternion.copy(quaternion);
-
-    this.candidatePosition
-      .copy(camera.position)
-      .addScaledVector(forward, this.ctx.options.assumedWallDistanceM);
-    this.candidatePosition.y = camera.position.y;
+    manualCandidate(
+      this.three,
+      camera,
+      this.ctx.options.assumedWallDistanceM,
+      this.tracker.position,
+      this.tracker.quaternion,
+    );
 
     this.hasCandidate = true;
     this.frame.group.visible = true;
-    this.frame.group.position.copy(this.candidatePosition);
-    this.frame.group.quaternion.copy(this.candidateQuaternion);
+    this.frame.group.position.copy(this.tracker.position);
+    this.frame.group.quaternion.copy(this.tracker.quaternion);
     if (this.reticle) this.reticle.visible = false;
   }
 
@@ -390,82 +383,56 @@ export class WebXRSceneManager implements SceneManager {
 
     const results = xrFrame.getHitTestResults(this.hitTestSource);
     const camera = this.renderer.xr.getCamera();
-    let accepted = false;
 
+    const matrices: Float32Array[] = [];
     for (const hit of results) {
       const pose = hit.getPose(space);
-      if (!pose) continue;
-
-      const { normal, position } = readHitPose(pose.transform.matrix);
-      if (!isWallNormal(normal[1], this.ctx.options.wallToleranceDeg)) continue;
-
-      const point = new this.three.Vector3(position[0], position[1], position[2]);
-      const distance = point.distanceTo(camera.position);
-      if (distance < MIN_HIT_M || distance > MAX_HIT_M) continue;
-
-      const quaternion = wallBasis(this.three, normal[0], normal[1], normal[2]);
-      if (!quaternion) continue;
-
-      point.addScaledVector(
-        new this.three.Vector3(normal[0], normal[1], normal[2]).normalize(),
-        WALL_GAP,
-      );
-
-      if (this.stableCount === 0) {
-        this.candidatePosition.copy(point);
-        this.candidateQuaternion.copy(quaternion);
-      } else {
-        // Poses de hit-test tremem. A maior fonte de instabilidade percebida é a
-        // rotação — a wallBasis já a elimina; o lerp cuida do resto.
-        this.candidatePosition.lerp(point, 0.25);
-        this.candidateQuaternion.slerp(quaternion, 0.25);
-      }
-
-      this.stableCount++;
-      this.lastHitAt = now;
-      accepted = true;
-      break;
+      if (pose) matrices.push(pose.transform.matrix);
     }
 
-    if (!accepted) {
-      const stale = now - this.lastHitAt > HIT_GRACE_MS;
-      if (stale) {
-        this.stableCount = 0;
+    const outcome = this.tracker.evaluate(
+      matrices,
+      results.length,
+      camera.position,
+      this.ctx.options.wallToleranceDeg,
+      now,
+    );
+
+    // A escalada de dicas roda em TODO frame sem hit aceito, inclusive durante a
+    // carência — só a limpeza visual espera a carência expirar.
+    if (outcome.kind === 'lost' || outcome.kind === 'grace') {
+      if (outcome.kind === 'lost') {
         this.hasCandidate = false;
         if (this.reticle) this.reticle.visible = false;
         if (!this.ctx.options.autoPlaceOnPlane) this.frame.group.visible = false;
-        if (results.length > 0) this.ctx.emit('hint', 'aim-wall');
+        if (outcome.sawHits) this.ctx.emit('hint', 'aim-wall');
       }
 
-      // Parede branca e lisa não gera feature points, logo não gera plano. Este
-      // é o caso mais comum do produto, não um caso de borda.
-      if (
-        !this.noWallNotified &&
-        !this.manualMode &&
-        now - this.startedAt > this.ctx.options.noHitTimeoutMs
-      ) {
-        this.noWallNotified = true;
-        this.ctx.emit('hint', 'no-wall-found');
-      } else if (!this.noWallNotified && now - this.startedAt > 3000) {
-        this.ctx.emit('hint', 'move-slower');
-      }
+      const hint = progressHint(
+        now - this.startedAt,
+        this.ctx.options.noHitTimeoutMs,
+        this.noWallNotified,
+        this.manualMode,
+      );
+      if (hint === 'no-wall-found') this.noWallNotified = true;
+      if (hint) this.ctx.emit('hint', hint);
       return;
     }
 
-    if (this.stableCount < STABLE_FRAMES) return;
+    if (outcome.kind === 'settling') return;
 
     this.hasCandidate = true;
-    if (this.reticleLine) this.reticleLine.color.setHex(0x22c55e);
+    if (this.reticleLine) this.reticleLine.color.setHex(RETICLE_STABLE);
 
     if (this.ctx.options.autoPlaceOnPlane) {
       if (this.reticle) this.reticle.visible = false;
       this.frame.group.visible = true;
-      this.frame.group.position.copy(this.candidatePosition);
-      this.frame.group.quaternion.copy(this.candidateQuaternion);
+      this.frame.group.position.copy(this.tracker.position);
+      this.frame.group.quaternion.copy(this.tracker.quaternion);
     } else if (this.reticle) {
       this.reticle.visible = true;
-      this.reticle.position.copy(this.candidatePosition);
-      this.reticle.quaternion.copy(this.candidateQuaternion);
+      this.reticle.position.copy(this.tracker.position);
+      this.reticle.quaternion.copy(this.tracker.quaternion);
     }
     this.ctx.emit('hint', 'tap-to-place');
   }

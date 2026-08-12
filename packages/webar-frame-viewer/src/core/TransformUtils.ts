@@ -92,8 +92,12 @@ export function computeFit(
 /**
  * A pose de um hit-test tem o eixo +Y alinhado com a normal da superfície.
  * `XRPose.transform.matrix` é column-major.
+ *
+ * Aceita `ArrayLike` para servir tanto ao `Float32Array` do WebXR cru quanto ao
+ * `number[]` de `Matrix4.elements`, que o caminho R3F usa — as duas são
+ * column-major, então a leitura é a mesma.
  */
-export function readHitPose(matrix: Float32Array): {
+export function readHitPose(matrix: ArrayLike<number>): {
   normal: [number, number, number];
   position: [number, number, number];
 } {

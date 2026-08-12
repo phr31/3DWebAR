@@ -12,31 +12,41 @@ const shared = {
   loader: { '.css': 'text' as const },
 };
 
+const REACT_EXTERNAL = [
+  'three',
+  'react',
+  'react-dom',
+  'react/jsx-runtime',
+  '@react-three/fiber',
+  '@react-three/xr',
+];
+
 export default defineConfig([
-  // 1) Build npm: núcleo + API vanilla.
+  // 1) Build React: é a entry principal (`.`) do pacote. Config separado por
+  //    causa do banner — se dividisse com `core`, o bundle server-safe também
+  //    ganharia a diretiva e viraria uma client reference inutilizável.
   {
     ...shared,
-    name: 'npm',
-    entry: { index: 'src/index.ts' },
+    name: 'react',
+    entry: { index: 'src/react/index.ts' },
+    format: ['esm', 'cjs'],
+    dts: true,
+    splitting: false,
+    external: REACT_EXTERNAL,
+    banner: { js: '"use client";' },
+    outExtension: ({ format }) => ({ js: format === 'cjs' ? '.cjs' : '.mjs' }),
+  },
+
+  // 2) Build server-safe (`./core`): tipos, erros e detecção de ambiente. Sem
+  //    banner e sem React — é o que um Server Component pode importar.
+  {
+    ...shared,
+    name: 'core',
+    entry: { core: 'src/core/public.ts' },
     format: ['esm', 'cjs'],
     dts: true,
     splitting: false,
     external: ['three'],
-    outExtension: ({ format }) => ({ js: format === 'cjs' ? '.cjs' : '.mjs' }),
-  },
-
-  // 2) Build React: config separado só por causa do banner. Se `index` e `react`
-  //    dividissem o config, o `index.mjs` (server-safe) também ganharia a
-  //    diretiva e viraria uma client reference inutilizável.
-  {
-    ...shared,
-    name: 'react',
-    entry: { react: 'src/react/index.ts' },
-    format: ['esm', 'cjs'],
-    dts: true,
-    splitting: false,
-    external: ['three', 'react', 'react-dom', 'react/jsx-runtime'],
-    banner: { js: '"use client";' },
     outExtension: ({ format }) => ({ js: format === 'cjs' ? '.cjs' : '.mjs' }),
   },
 

@@ -22,7 +22,7 @@ export interface BuiltFrame {
 }
 
 /** Folga entre a face de trás e o plano da parede, evitando z-fighting. */
-const WALL_OFFSET = 0.002;
+export const WALL_OFFSET = 0.002;
 
 /**
  * Sombra de verdade exigiria luz + shadow map + superfície receptora, e na
@@ -36,7 +36,7 @@ const WALL_OFFSET = 0.002;
  * Safari é irregular. O truque é desenhar o retângulo-fonte fora do canvas e
  * deixar só a sombra cair dentro.
  */
-function makeShadowTexture(three: ThreeNS, aspect: number, size = 256): THREE.CanvasTexture {
+export function makeShadowTexture(three: ThreeNS, aspect: number, size = 256): THREE.CanvasTexture {
   const w = size;
   const h = Math.max(32, Math.round(size / aspect));
   const canvas = document.createElement('canvas');
