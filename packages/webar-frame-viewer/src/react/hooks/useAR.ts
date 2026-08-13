@@ -53,6 +53,16 @@ export interface ARApi {
   registerReposition(handler: (() => void) | null): void;
   /** Acionado pelo overlay. Sem cena registrada, não faz nada. */
   reposition(): void;
+  /**
+   * Mesmo desenho do `registerReposition`: quem sabe travar é a cena — no WebXR
+   * é recriar a âncora, no passthrough é fechar os gestos. Aqui só encaminha.
+   */
+  registerLock(handler: ((locked: boolean) => void) | null): void;
+  /** Alterna o cadeado. Chamado pelo botão do overlay. */
+  toggleLock(): void;
+  /** Escrito pela cena depois de travar/destravar de fato. Dispara o toast. */
+  setLocked(locked: boolean): void;
+  showToast(text: string): void;
   /** Leitura de diagnóstico do HUD (`options.debug`). */
   setDebug(info: DebugInfo | null): void;
   manualModeRef: React.RefObject<boolean>;
@@ -63,6 +73,8 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
   const capabilitiesRef = useRef<CapabilityReport | null>(null);
   const manualModeRef = useRef(false);
   const repositionRef = useRef<(() => void) | null>(null);
+  const lockRef = useRef<((locked: boolean) => void) | null>(null);
+  const toastSeqRef = useRef(0);
   const startingRef = useRef(false);
   // Declarados aqui porque `fail` (definido antes de `start`) precisa reiniciar.
   const startRef = useRef<((enterXR: () => Promise<unknown>) => Promise<void>) | null>(null);
@@ -250,14 +262,16 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
 
   const reportPlaced = useCallback(
     (info: PlacementInfo) => {
-      store.set({ status: 'placed', hint: 'placed' });
+      // Ancorado, ainda destravado: é a janela de ajuste fino. Travar é um ato
+      // explícito no cadeado — o toque nunca trava nem destrava sozinho.
+      store.set({ status: 'placed', hint: 'adjust', locked: false });
       latest.current.onPlace?.(info);
     },
     [store],
   );
 
   const reportUnplaced = useCallback(() => {
-    store.set({ status: 'placing', hint: 'scan' });
+    store.set({ status: 'placing', hint: 'scan', locked: false });
   }, [store]);
 
   const registerReposition = useCallback((handler: (() => void) | null) => {
@@ -269,6 +283,41 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
   const reposition = useCallback(() => {
     repositionRef.current?.();
   }, []);
+
+  const registerLock = useCallback((handler: ((locked: boolean) => void) | null) => {
+    lockRef.current = handler;
+  }, []);
+
+  const showToast = useCallback(
+    (text: string) => {
+      toastSeqRef.current += 1;
+      store.set({ toast: { id: toastSeqRef.current, text } });
+    },
+    [store],
+  );
+
+  const setLocked = useCallback(
+    (locked: boolean) => {
+      const current = store.get();
+      if (current.locked === locked) return;
+      toastSeqRef.current += 1;
+      store.set({
+        locked,
+        hint: locked ? 'placed' : 'adjust',
+        toast: {
+          id: toastSeqRef.current,
+          text: latest.current.t(locked ? 'toast.locked' : 'toast.unlocked'),
+        },
+      });
+    },
+    [store],
+  );
+
+  const toggleLock = useCallback(() => {
+    const handler = lockRef.current;
+    if (!handler) return;
+    handler(!store.get().locked);
+  }, [store]);
 
   const setDebug = useCallback(
     (info: DebugInfo | null) => {
@@ -312,6 +361,10 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
       enableManualPlacement,
       registerReposition,
       reposition,
+      registerLock,
+      toggleLock,
+      setLocked,
+      showToast,
       setDebug,
       manualModeRef,
     }),
@@ -329,6 +382,10 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
       enableManualPlacement,
       registerReposition,
       reposition,
+      registerLock,
+      toggleLock,
+      setLocked,
+      showToast,
       setDebug,
     ],
   );

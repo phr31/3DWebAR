@@ -60,8 +60,19 @@ export function ProductAR({ product }: { product: ProductData }) {
       {isOpen && (
         <FrameViewer
           product={product}
-          options={{ debug }}
+          options={{
+            debug,
+            // O fluxo de orientação (apontar → tocar → ajustar → 🔒) já vem
+            // pronto; `strings` só existe para ajustar o tom da loja. Frases
+            // curtas: elas ficam sobre a parede e somem sozinhas.
+            strings: {
+              'hint.scan': 'Aponte para onde o quadro vai ficar',
+              'hint.adjust': 'Arraste para ajustar · 🔒 trava',
+            },
+          }}
           onClose={() => setIsOpen(false)}
+          // Dispara ao ANCORAR (primeiro toque), não ao travar: é o momento em
+          // que o cliente escolheu a parede.
           onPlace={(info) => console.log('Quadro posicionado em:', info.position)}
           onError={(err) => console.error(err.code, err.userMessage)}
         />

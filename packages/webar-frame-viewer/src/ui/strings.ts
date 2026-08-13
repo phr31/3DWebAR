@@ -5,6 +5,10 @@ export type StringKey =
   | 'close'
   | 'photo'
   | 'retry'
+  | 'lock'
+  | 'unlock'
+  | 'toast.locked'
+  | 'toast.unlocked'
   | 'reposition'
   | 'manual'
   | 'keepTrying'
@@ -17,6 +21,7 @@ export type StringKey =
   | 'hint.no-wall-found'
   | 'hint.drag-to-move'
   | 'hint.no-yaw'
+  | 'hint.adjust'
   | 'hint.placed';
 
 const PT: Record<StringKey, string> = {
@@ -24,6 +29,10 @@ const PT: Record<StringKey, string> = {
   close: 'Fechar',
   photo: 'Tirar foto',
   retry: 'Tentar novamente',
+  lock: 'Travar posição',
+  unlock: 'Destravar posição',
+  'toast.locked': 'Posição travada',
+  'toast.unlocked': 'Posição liberada para ajuste',
   reposition: 'Reposicionar',
   manual: 'Posicionar manualmente',
   keepTrying: 'Continuar tentando',
@@ -33,7 +42,7 @@ const PT: Record<StringKey, string> = {
   // A paralaxe é o que constrói o plano; usuário parado nunca detecta nada.
   'hint.move-slower': 'Mova o celular lentamente de um lado para o outro',
   'hint.aim-wall': 'Isso parece o chão — aponte para a parede',
-  'hint.tap-to-place': 'Toque para posicionar',
+  'hint.tap-to-place': 'Toque na parede para posicionar',
   // O ARCore agarra em bordas quase instantaneamente. Uma linha de texto que
   // melhora a taxa de sucesso mais do que qualquer código.
   'hint.no-wall-found':
@@ -43,7 +52,10 @@ const PT: Record<StringKey, string> = {
   // que deixar o usuário achar que o quadro está escorregando.
   'hint.no-yaw':
     'Seu aparelho não rastreia giros na horizontal. Mantenha o celular parado, arraste o quadro e toque para fixar.',
-  'hint.placed': 'Quadro fixado. Use "Reposicionar" para mover.',
+  // Passo 3 do fluxo: já ancorado, ainda ajustável. O emoji repete o ícone do
+  // botão porque é o que liga a frase ao controle sem uma seta apontando.
+  'hint.adjust': 'Arraste para ajustar · 🔒 trava',
+  'hint.placed': 'Quadro travado',
 };
 
 const EN: Record<StringKey, string> = {
@@ -51,6 +63,10 @@ const EN: Record<StringKey, string> = {
   close: 'Close',
   photo: 'Take a photo',
   retry: 'Try again',
+  lock: 'Lock position',
+  unlock: 'Unlock position',
+  'toast.locked': 'Position locked',
+  'toast.unlocked': 'Free to adjust',
   reposition: 'Reposition',
   manual: 'Place manually',
   keepTrying: 'Keep trying',
@@ -59,13 +75,14 @@ const EN: Record<StringKey, string> = {
   'hint.scan': 'Point the camera at the wall',
   'hint.move-slower': 'Move the phone slowly from side to side',
   'hint.aim-wall': 'That looks like the floor — aim at the wall',
-  'hint.tap-to-place': 'Tap to place',
+  'hint.tap-to-place': 'Tap the wall to place',
   'hint.no-wall-found':
     'We could not find the wall. Try aiming near a corner, a light switch or a door frame.',
   'hint.drag-to-move': 'Drag to move · pinch to adjust the distance',
   'hint.no-yaw':
     'Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it.',
-  'hint.placed': 'Frame locked. Use "Reposition" to move it.',
+  'hint.adjust': 'Drag to adjust · 🔒 locks',
+  'hint.placed': 'Frame locked',
 };
 
 export function createStrings(

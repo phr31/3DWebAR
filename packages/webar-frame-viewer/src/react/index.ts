@@ -14,7 +14,9 @@ export * from '../core/public';
 
 // Componentes, para quem quiser montar a própria cena.
 export { ARCanvas, type ARCanvasProps } from './components/ARCanvas';
+export { CoachIcon, type CoachIconProps } from './components/CoachIcon';
 export { type FrameMetrics, FrameModel, type FrameModelProps } from './components/FrameModel';
+export { LockButton, type LockButtonProps } from './components/LockButton';
 export { Overlay, type OverlayProps } from './components/Overlay';
 export { PassthroughScene, type PassthroughSceneProps } from './components/PassthroughScene';
 export { Reticle, type ReticleProps } from './components/Reticle';
@@ -25,6 +27,7 @@ export { type ARApi, hintText, type UseAROptions, useAR } from './hooks/useAR';
 export { type ArtTextureResult, useArtTexture } from './hooks/useArtTexture';
 export { type CaptureOptions, type CaptureResult, useCapture } from './hooks/useCapture';
 export { type HitTestOptions, type HitTestResult, useHitTest } from './hooks/useHitTest';
+export { useCoachHint, useIdleChrome } from './hooks/useOverlayVisibility';
 export {
   type PassthroughOptions,
   type PassthroughResult,
@@ -43,6 +46,7 @@ export {
   type PanelAction,
   type PanelMode,
   type PanelState,
+  type ToastState,
   useViewerState,
   useViewerStore,
   type ViewerState,

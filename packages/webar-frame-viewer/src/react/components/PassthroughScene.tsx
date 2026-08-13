@@ -46,6 +46,7 @@ export function PassthroughScene({
   const groupRef = useRef<THREE.Group | null>(null);
   const placedRef = useRef(false);
   const [placed, setPlaced] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [ambient, setAmbient] = useState(1);
   const [yaw, setYaw] = useState<YawStatus>('unknown');
   const readyReportedRef = useRef(false);
@@ -69,25 +70,43 @@ export function PassthroughScene({
     onPlace: (info) => {
       placedRef.current = true;
       setPlaced(true);
+      setLocked(false);
       api.reportPlaced(info);
     },
   });
 
-  // Destravar é decisão explícita do usuário pelo botão "Reposicionar": um toque
-  // na tela só fixa. A posição atual é preservada — quem reposiciona continua de
-  // onde parou, e não do centro.
+  // "Reposicionar" reinicia: solta o quadro e volta ao começo do fluxo. A posição
+  // atual é preservada — quem reposiciona continua de onde parou, e não do
+  // centro.
   useEffect(() => {
     api.registerReposition(() => {
       placedRef.current = false;
       placement.unplace();
       setPlaced(false);
+      setLocked(false);
       api.reportUnplaced();
     });
     return () => api.registerReposition(null);
   }, [api, placement]);
 
+  // O cadeado não mexe na âncora aqui: no passthrough travar é só fechar os
+  // gestos, e destravar é reabri-los sem mover nada.
   useEffect(() => {
-    if (placed) return;
+    api.registerLock((next) => {
+      placement.setLocked(next);
+      setLocked(next);
+      api.setLocked(next);
+    });
+    return () => api.registerLock(null);
+  }, [api, placement]);
+
+  useEffect(() => {
+    // Ancorado e destravado: a dica passa a ser o ajuste fino. Travado, o texto
+    // vem do `setLocked` no `useAR` e não deve ser sobrescrito aqui.
+    if (placed) {
+      if (!locked) api.setHint('adjust');
+      return;
+    }
     // Sem guinada não existe rastreamento horizontal: dizer isso vale mais do que
     // repetir "arraste para mover".
     if (yaw === 'dead') {
@@ -95,7 +114,7 @@ export function PassthroughScene({
       return;
     }
     api.setHint(options.autoPlaceOnPlane ? 'drag-to-move' : 'tap-to-place');
-  }, [api, options.autoPlaceOnPlane, placed, yaw]);
+  }, [api, options.autoPlaceOnPlane, placed, locked, yaw]);
 
   useFrame((_state, _delta) => {
     const group = groupRef.current;

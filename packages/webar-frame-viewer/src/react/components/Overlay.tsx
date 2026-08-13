@@ -5,7 +5,10 @@ import type { SceneKind } from '../../core/types';
 import { injectStyles } from '../../ui/injectStyles';
 import type { StringKey } from '../../ui/strings';
 import { hintText } from '../hooks/useAR';
+import { useCoachHint, useIdleChrome } from '../hooks/useOverlayVisibility';
 import { overlayState, useViewerState } from '../store';
+import { CoachIcon } from './CoachIcon';
+import { LockButton } from './LockButton';
 
 /**
  * A interface, agora em React.
@@ -25,11 +28,15 @@ export interface OverlayProps {
   stageRef: Ref<HTMLDivElement>;
   /** Callback ref: a raiz vira o `domOverlay` da sessão WebXR quando ela monta. */
   rootRef: Ref<HTMLDivElement>;
+  /** Elementos já montados, para os temporizadores de visibilidade ouvirem. */
+  root: HTMLElement | null;
+  stage: HTMLElement | null;
   onStart(): void;
   onClose(): void;
   onPhotoPrepare(): void;
   onPhoto(): void;
   onReposition(): void;
+  onToggleLock(): void;
   children?: React.ReactNode;
 }
 
@@ -39,11 +46,14 @@ export function Overlay({
   videoRef,
   stageRef,
   rootRef,
+  root,
+  stage,
   onStart,
   onClose,
   onPhotoPrepare,
   onPhoto,
   onReposition,
+  onToggleLock,
   children,
 }: OverlayProps): React.ReactElement {
   const state = useViewerState();
@@ -75,6 +85,13 @@ export function Overlay({
 
   const hint = hintText(state.hint, t);
   const engine: SceneKind | 'none' = state.engine ?? 'none';
+  const visual = overlayState(state.status);
+
+  // A dica é passo a passo: uma mensagem por vez, que sai de cena sozinha. Fora
+  // dos estados de câmera no ar não existe passo nenhum para orientar.
+  const live = visual === 'ready' || visual === 'placing' || visual === 'placed';
+  const hintVisible = useCoachHint(live && hint ? state.hint : null, stage);
+  const idle = useIdleChrome(root, live && state.panel == null);
 
   return (
     <div
@@ -83,10 +100,12 @@ export function Overlay({
       role="dialog"
       aria-modal="true"
       aria-label="Visualizar quadro em Realidade Aumentada"
-      data-fv-state={overlayState(state.status)}
+      data-fv-state={visual}
       data-fv-engine={engine}
-      data-fv-hint={hint ? '1' : ''}
+      data-fv-hint={hintVisible && hint ? '1' : ''}
       data-fv-capture={state.canCapture ? '1' : '0'}
+      data-fv-lock={state.locked ? '1' : '0'}
+      data-fv-idle={idle ? '1' : ''}
     >
       <div className="fv-stage" ref={stageRef}>
         {/* Sem `playsinline` o iOS abre o player em tela cheia e a experiência
@@ -156,15 +175,28 @@ export function Overlay({
           </div>
         </div>
 
-        <p className="fv-hint">{hint}</p>
+        <p className="fv-hint">
+          {state.hint && <CoachIcon hint={state.hint} />}
+          <span>{hint}</span>
+        </p>
+
+        {/* `key` no id, e não no texto: travar → destravar → travar precisa
+            reanimar mesmo repetindo a mensagem. */}
+        {state.toast && (
+          <p key={state.toast.id} className="fv-toast" role="status" aria-live="polite">
+            {state.toast.text}
+          </p>
+        )}
 
         <footer className="fv-bar fv-bar--bottom">
           <div className="fv-actions">
-            {/* Único caminho para soltar o quadro depois de fixado. O CSS o
-                mostra apenas em `data-fv-state="placed"`. */}
+            {/* Recomeça o fluxo do zero. Só aparece com o quadro travado: enquanto
+                destravado, arrastar já resolve e um terceiro botão só polui. */}
             <button type="button" className="fv-btn fv-reposition" onClick={onReposition}>
               {t('reposition')}
             </button>
+
+            <LockButton locked={state.locked} t={t} onToggle={onToggleLock} />
 
             {/* pointerdown prepara o blob, click compartilha: o `navigator.share`
                 exige transient activation e não sobreviveria à espera do encode. */}

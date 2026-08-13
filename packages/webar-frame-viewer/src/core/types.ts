@@ -58,6 +58,8 @@ export type ARHint =
   | 'no-wall-found'
   | 'drag-to-move'
   | 'no-yaw'
+  // Ancorado mas ainda destravado: é a janela de ajuste fino, antes do cadeado.
+  | 'adjust'
   | 'placed';
 
 export interface PlacementInfo {

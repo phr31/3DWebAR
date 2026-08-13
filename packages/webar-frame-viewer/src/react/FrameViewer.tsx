@@ -168,11 +168,14 @@ function FrameViewerInner({
         videoRef={videoRef}
         stageRef={setStage}
         rootRef={setRoot}
+        root={root}
+        stage={stage}
         onStart={handleStart}
         onClose={api.close}
         onPhotoPrepare={handlePhotoPrepare}
         onPhoto={handlePhoto}
         onReposition={api.reposition}
+        onToggleLock={api.toggleLock}
       >
         {ready && art.art && xrStore && (
           <ARCanvas
@@ -189,6 +192,7 @@ function FrameViewerInner({
                 style={options.frame}
                 options={options}
                 api={api}
+                stage={stage}
               />
             ) : (
               // Só pede a câmera depois do toque: `status` sai de 'idle'.

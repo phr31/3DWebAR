@@ -823,10 +823,14 @@ div.fv-root                        [role=dialog] [aria-modal=true]
     │       ├── p.fv-panel__title
     │       ├── p.fv-panel__msg
     │       └── div.fv-panel__actions
-    ├── p.fv-hint
+    ├── p.fv-hint                  dica do passo atual
+    │   ├── svg.fv-coach-icon      ícone do passo (ausente em dicas sem ícone)
+    │   └── span
+    ├── p.fv-toast                 [role=status] só enquanto há aviso
     └── footer.fv-bar.fv-bar--bottom
         ├── div.fv-actions
-        │   ├── button.fv-btn.fv-reposition   só em data-fv-state="placed"
+        │   ├── button.fv-btn.fv-reposition   só em placed + data-fv-lock="1"
+        │   ├── button.fv-btn.fv-btn--icon.fv-lock   só em data-fv-state="placed"
         │   └── button.fv-btn.fv-btn--icon.fv-shot
         └── p.fv-privacy
 ```
@@ -841,6 +845,26 @@ O JavaScript só troca atributos; o CSS faz o resto. Use-os para condicionar seu
 | `data-fv-engine` | `none` · `webxr` · `passthrough` | Engine escolhido |
 | `data-fv-hint` | `'1'` quando há dica visível, `''` quando não | Texto da dica |
 | `data-fv-capture` | `'1'` · `'0'` | Se o botão de foto é possível |
+| `data-fv-lock` | `'1'` travado · `'0'` destravado | Cadeado de posição (só vale em `placed`) |
+| `data-fv-idle` | `'1'` após 5 s sem toque, `''` quando não | Recolhimento automático da interface |
+
+### Fluxo de posicionamento
+
+O toque **ancora** o quadro; ele não trava. Entre ancorar e travar existe uma janela de
+ajuste fino em que arrastar o dedo move a peça — nos dois engines. O cadeado 🔒 é o que
+congela de vez, e é também a única forma de destravar. Um toque na tela nunca solta um
+quadro já ancorado.
+
+| Passo | `data-fv-state` | `data-fv-lock` | Dica | Gestos |
+|---|---|---|---|---|
+| Apontar para a parede | `placing` | `0` | `hint.scan` | — |
+| Tocar para posicionar | `placing` | `0` | `hint.tap-to-place` | toque ancora |
+| Ajustar | `placed` | `0` | `hint.adjust` | arrastar move |
+| Travado | `placed` | `1` | `hint.placed` | nenhum |
+
+> **Mudança visual em `.fv-hint` desde a v0.1.0:** a dica deixou de ter fundo e
+> `border-radius` — agora é só texto branco com sombra, para não tapar a parede que o
+> usuário está avaliando. Quem tematizava o fundo da pílula precisa reintroduzi-lo.
 
 ### Exemplo de tema
 
@@ -848,8 +872,14 @@ O JavaScript só troca atributos; o CSS faz o resto. Use-os para condicionar seu
 /* Botão principal na cor da marca */
 .fv-root .fv-btn--primary { background: #7c3aed; }
 
-/* Dica com fundo mais discreto */
-.fv-root .fv-hint { background: rgba(0, 0, 0, 0.35); font-size: 13px; }
+/* Trazer de volta o fundo da dica, se o texto puro não bastar */
+.fv-root .fv-hint { background: rgba(0, 0, 0, 0.35); border-radius: 999px; }
+
+/* Cadeado travado na cor da marca */
+.fv-root[data-fv-lock='1'] .fv-lock { background: #7c3aed; }
+
+/* Desligar o recolhimento automático da interface */
+.fv-root[data-fv-idle='1'] .fv-ui * { opacity: inherit; }
 
 /* Esconder a linha de privacidade (não recomendado) */
 .fv-root .fv-privacy { display: none; }
@@ -890,6 +920,10 @@ sobrescrita por `options.strings`:
 | `close` | Fechar | Close |
 | `photo` | Tirar foto | Take a photo |
 | `retry` | Tentar novamente | Try again |
+| `lock` | Travar posição | Lock position |
+| `unlock` | Destravar posição | Unlock position |
+| `toast.locked` | Posição travada | Position locked |
+| `toast.unlocked` | Posição liberada para ajuste | Free to adjust |
 | `reposition` | Reposicionar | Reposition |
 | `manual` | Posicionar manualmente | Place manually |
 | `keepTrying` | Continuar tentando | Keep trying |
@@ -898,11 +932,12 @@ sobrescrita por `options.strings`:
 | `hint.scan` | Aponte a câmera para a parede | Point the camera at the wall |
 | `hint.move-slower` | Mova o celular lentamente de um lado para o outro | Move the phone slowly from side to side |
 | `hint.aim-wall` | Isso parece o chão — aponte para a parede | That looks like the floor — aim at the wall |
-| `hint.tap-to-place` | Toque para posicionar | Tap to place |
+| `hint.tap-to-place` | Toque na parede para posicionar | Tap the wall to place |
 | `hint.no-wall-found` | Não encontramos a parede. Tente apontar perto de um canto, um interruptor ou o batente da porta. | We could not find the wall. Try aiming near a corner, a light switch or a door frame. |
 | `hint.drag-to-move` | Arraste para mover · pince para ajustar a distância | Drag to move · pinch to adjust the distance |
 | `hint.no-yaw` | Seu aparelho não rastreia giros na horizontal. Mantenha o celular parado, arraste o quadro e toque para fixar. | Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it. |
-| `hint.placed` | Quadro fixado. Use "Reposicionar" para mover. | Frame locked. Use "Reposition" to move it. |
+| `hint.adjust` | Arraste para ajustar · 🔒 trava | Drag to adjust · 🔒 locks |
+| `hint.placed` | Quadro travado | Frame locked |
 
 As chaves `hint.*` correspondem 1:1 aos valores de `ARHint`.
 

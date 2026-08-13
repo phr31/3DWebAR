@@ -44,12 +44,29 @@ export interface DebugInfo {
   yaw: YawStatus;
 }
 
+/**
+ * Aviso momentâneo. O `id` incremental existe para o `key` do React: sem ele,
+ * travar → destravar → travar não reinicia a animação, porque o texto repetido é
+ * o mesmo nó e o CSS não reanima.
+ */
+export interface ToastState {
+  id: number;
+  text: string;
+}
+
 export interface ViewerState {
   status: ARStatus;
   engine: SceneKind | null;
   hint: ARHint | null;
   panel: PanelState | null;
   canCapture: boolean;
+  /**
+   * Só significa alguma coisa com `status: 'placed'`. Ancorado e travado são
+   * coisas diferentes: depois do toque o quadro para de seguir a parede (ancora)
+   * mas continua arrastável, e só o cadeado congela os gestos.
+   */
+  locked: boolean;
+  toast: ToastState | null;
   error: ARError | null;
   debug: DebugInfo | null;
 }
@@ -60,6 +77,8 @@ export const INITIAL_STATE: ViewerState = {
   hint: null,
   panel: null,
   canCapture: false,
+  locked: false,
+  toast: null,
   error: null,
   debug: null,
 };
@@ -105,8 +124,9 @@ export function useViewerStore(): ViewerStore {
 }
 
 /**
- * O estado inteiro, não um seletor: são seis campos e um overlay pequeno, então
- * um seletor com memo custaria mais complexidade do que economiza em render.
+ * O estado inteiro, não um seletor: são poucos campos e um overlay pequeno,
+ * então um seletor com memo custaria mais complexidade do que economiza em
+ * render.
  */
 export function useViewerState(): ViewerState {
   const store = useViewerStore();

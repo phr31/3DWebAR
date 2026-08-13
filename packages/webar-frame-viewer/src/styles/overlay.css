@@ -100,6 +100,14 @@
   transform: scale(0.97);
 }
 
+/* Controles das barras nunca são opacos: eles ficam sobre a parede que o usuário
+   está avaliando. O painel de erro e o botão de iniciar ficam de fora — ali a
+   legibilidade importa mais do que a discrição. */
+.fv-bar .fv-btn {
+  opacity: 0.85;
+  transition: opacity 0.4s;
+}
+
 .fv-btn--primary {
   background: #16a34a;
 }
@@ -172,17 +180,81 @@
   }
 }
 
+/* Sem caixa e sem borda: só texto com sombra. A pílula preta de antes tapava a
+   parede exatamente onde o usuário precisa olhar para decidir onde pendurar. A
+   dupla sombra (dura + difusa) mantém o branco legível sobre parede clara. */
 .fv-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   margin: 0 auto;
-  padding: 10px 16px;
+  padding: 6px 16px;
   max-width: 22rem;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 1.35;
   text-align: center;
+  text-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.9),
+    0 0 12px rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.35s;
+}
+
+.fv-coach-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  /* `drop-shadow` e não `text-shadow`: o traço do SVG não é texto. */
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9));
+}
+
+/* Aviso momentâneo do cadeado. Mesma linguagem da dica — texto e sombra, nada
+   mais — e sai de cena sozinho pela animação, sem timer no JS. */
+.fv-toast {
+  margin: 0 auto;
+  padding: 4px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  text-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.9),
+    0 0 12px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  animation: fv-toast 2.4s ease-out forwards;
+}
+
+@keyframes fv-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  12%,
+  70% {
+    opacity: 0.85;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-toast {
+    animation-name: fv-toast-fade;
+  }
+
+  @keyframes fv-toast-fade {
+    0%,
+    70% {
+      opacity: 0.85;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
 }
 
 .fv-debug {
@@ -230,7 +302,7 @@
 .fv-root[data-fv-state="ready"] .fv-hint,
 .fv-root[data-fv-state="placing"] .fv-hint,
 .fv-root[data-fv-state="placed"] .fv-hint {
-  opacity: 1;
+  opacity: 0.85;
 }
 
 .fv-root[data-fv-hint=""] .fv-hint {
@@ -263,12 +335,28 @@
   opacity: 0;
 }
 
-/* "Reposicionar" só existe com o quadro fixado: é o caminho de volta. */
+/* Cadeado: só existe depois de ancorar, porque antes não há posição a travar. */
+.fv-lock {
+  display: none;
+}
+
+.fv-root[data-fv-state="placed"] .fv-lock {
+  display: inline-grid;
+}
+
+/* Estado travado é cor, não só ícone: o verde é o mesmo do botão primário, então
+   "travado" fica do lado de "confirmado" na linguagem visual do overlay. */
+.fv-root[data-fv-lock="1"] .fv-lock {
+  background: #16a34a;
+}
+
+/* "Reposicionar" recomeça a varredura e só faz sentido com o quadro travado —
+   enquanto destravado, arrastar já ajusta e um terceiro botão só polui. */
 .fv-reposition {
   display: none;
 }
 
-.fv-root[data-fv-state="placed"] .fv-reposition {
+.fv-root[data-fv-state="placed"][data-fv-lock="1"] .fv-reposition {
   display: inline-flex;
 }
 
@@ -281,4 +369,27 @@
 .fv-root[data-fv-state="loading"] .fv-shot,
 .fv-root[data-fv-state="error"] .fv-shot {
   display: none;
+}
+
+/* Ociosidade: 5 s parado e a interface sai da frente da parede. Depois das
+   regras de estado de propósito — mesma especificidade, então quem vem por
+   último vence e o `data-fv-idle` sobrepõe a opacidade da dica. */
+.fv-root[data-fv-idle="1"] .fv-bar--top,
+.fv-root[data-fv-idle="1"] .fv-privacy,
+.fv-root[data-fv-idle="1"] .fv-hint,
+.fv-root[data-fv-idle="1"] .fv-reposition,
+.fv-root[data-fv-idle="1"] .fv-shot {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Exceção deliberada: o cadeado permanece. Some-lo obrigaria o usuário a acordar
+   a interface antes de conseguir congelar o quadro. */
+.fv-root[data-fv-idle="1"] .fv-lock {
+  opacity: 0.4;
+}
+
+.fv-bar--top,
+.fv-privacy {
+  transition: opacity 0.4s;
 }
