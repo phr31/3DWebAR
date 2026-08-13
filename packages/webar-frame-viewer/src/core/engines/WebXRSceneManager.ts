@@ -57,6 +57,8 @@ export class WebXRSceneManager implements SceneManager {
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private canvas!: HTMLCanvasElement;
+  /** Onde o `beforexrselect` é bloqueado. Ver o comentário em `mount`. */
+  private selectGuard!: HTMLElement;
 
   private session: XRSession | null = null;
   private viewerSpace: XRReferenceSpace | null = null;
@@ -97,7 +99,13 @@ export class WebXRSceneManager implements SceneManager {
     this.canvas.addEventListener('webglcontextlost', this.onContextLost);
     // Sem isto, tocar num botão do overlay também dispara `select` na sessão e o
     // quadro se reposiciona junto com o clique em "Foto".
-    ctx.overlay.addEventListener('beforexrselect', this.onBeforeSelect);
+    //
+    // O alvo é `.fv-ui`, não a raiz: a raiz É o `domOverlay` e cobre a tela
+    // inteira, então cancelar ali engoliria o `select` de QUALQUER toque — e o
+    // "toque para fixar" nunca dispararia. `.fv-ui` é `pointer-events: none` e só
+    // os controles são `auto`, então o evento só sobe por ela em toque de botão.
+    this.selectGuard = ctx.overlay.querySelector<HTMLElement>('.fv-ui') ?? ctx.overlay;
+    this.selectGuard.addEventListener('beforexrselect', this.onBeforeSelect);
   }
 
   setContent(frame: BuiltFrame): void {
@@ -227,7 +235,7 @@ export class WebXRSceneManager implements SceneManager {
     this.endingIntentionally = true;
     this.renderer.setAnimationLoop(null);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
-    this.ctx.overlay.removeEventListener('beforexrselect', this.onBeforeSelect);
+    this.selectGuard?.removeEventListener('beforexrselect', this.onBeforeSelect);
 
     this.hitTestSource?.cancel();
     this.hitTestSource = null;

@@ -75,31 +75,49 @@ function FrameViewerInner({
   // Elemento, não ref: o `usePassthroughPlacement` precisa reagir à montagem
   // para anexar os gestos, e mudanças em `.current` não disparam render.
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
+  // Idem para a raiz do overlay: ela é o `domOverlay` da sessão XR, e a store só
+  // pode ser criada quando o elemento existir.
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
 
   const api = useAR({ options, t, onReady, onPlace, onError, onClose });
 
   /**
-   * `domOverlay` recebe o elemento do overlay: sem isso os botões somem quando a
-   * sessão `immersive-ar` assume a tela. A store é criada uma vez por instância.
+   * `domOverlay` PRECISA receber o nosso elemento. Com `true`, o @react-three/xr
+   * cria uma `<div>` vazia própria e a usa como raiz — e como o Chrome só compõe
+   * a subárvore dessa raiz durante o `immersive-ar`, todo o `.fv-root` (dica,
+   * fechar, painel, "Reposicionar") ficaria invisível dentro da sessão.
+   *
+   * Por isso a store nasce só depois que a raiz monta. Isso não atrasa nada que
+   * importe: `enterAR()` acontece no toque do usuário, muito depois do commit.
    */
   const xrStore = useMemo(
     () =>
-      createXRStore({
-        hitTest: true,
-        anchors: true,
-        domOverlay: true,
-        // `local-floor` não precisa ser pedido: o @react-three/xr já o inclui
-        // em `requiredFeatures`, que é exatamente o que o engine antigo fazia
-        // com `setReferenceSpaceType('local-floor')`.
-        //
-        // Este é um fluxo de celular: nada de controles, mãos ou raios.
-        controller: false,
-        hand: false,
-      }),
-    [],
+      root == null
+        ? null
+        : createXRStore({
+            hitTest: true,
+            anchors: true,
+            domOverlay: root,
+            // `local-floor` não precisa ser pedido: o @react-three/xr já o inclui
+            // em `requiredFeatures`, que é exatamente o que o engine antigo fazia
+            // com `setReferenceSpaceType('local-floor')`.
+            //
+            // Este é um fluxo de celular: nada de controles, mãos ou raios.
+            controller: false,
+            hand: false,
+          }),
+    [root],
   );
 
-  const enterXR = useCallback(() => xrStore.enterAR(), [xrStore]);
+  const enterXR = useCallback(
+    () =>
+      xrStore
+        ? xrStore.enterAR()
+        : // Inalcançável na prática: a raiz monta no primeiro commit e o toque vem
+          // depois. Falha como erro de XR, que o `useAR` já sabe degradar.
+          Promise.reject(new Error('overlay ainda não montado')),
+    [xrStore],
+  );
 
   useEffect(() => {
     api.setEnterXR(enterXR);
@@ -140,7 +158,7 @@ function FrameViewerInner({
   const engine: SceneKind | null =
     state.status === 'destroyed' ? null : (state.engine ?? api.capabilities?.recommended ?? null);
 
-  const ready = art.art !== null && engine !== null;
+  const ready = art.art !== null && engine !== null && xrStore !== null;
 
   return (
     <div className={className}>
@@ -149,12 +167,14 @@ function FrameViewerInner({
         title={product.title}
         videoRef={videoRef}
         stageRef={setStage}
+        rootRef={setRoot}
         onStart={handleStart}
         onClose={api.close}
         onPhotoPrepare={handlePhotoPrepare}
         onPhoto={handlePhoto}
+        onReposition={api.reposition}
       >
-        {ready && art.art && (
+        {ready && art.art && xrStore && (
           <ARCanvas
             engine={engine}
             xrStore={xrStore}

@@ -96,6 +96,7 @@ passthrough — sem paralaxe ao andar. Isso é o estado da plataforma, não um d
 | `locale` | `'pt-BR'` | `'pt-BR'` ou `'en'` |
 | `strings` | `{}` | Sobrescreve textos individuais do overlay |
 | `threeUrl` | — | URL de um build ESM do `three`, para CSP restritiva |
+| `debug` | `false` | Mostra engine e estado dos sensores no overlay |
 | `onReady` / `onPlace` / `onError` / `onClose` | — | Callbacks |
 
 Estilo padrão da moldura: `fit: 'contain'`, `frameWidthCm: 2`, `frameColor: '#2b2118'`,

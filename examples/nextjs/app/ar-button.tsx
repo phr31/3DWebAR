@@ -17,6 +17,13 @@ const FrameViewer = dynamic(() => import('webar-frame-viewer').then((mod) => mod
 export function ProductAR({ product }: { product: ProductData }) {
   const [isOpen, setIsOpen] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
+  // `?debug=1` liga o HUD com engine e sensores. Num effect, e não durante o
+  // render, porque este componente também é renderizado no servidor.
+  const [debug, setDebug] = useState(false);
+
+  useEffect(() => {
+    setDebug(new URLSearchParams(window.location.search).has('debug'));
+  }, []);
 
   // `detectCapabilities` vem de `/core`, que é server-safe e não arrasta React
   // nem three — dá para checar suporte sem pagar o bundle da experiência.
@@ -53,6 +60,7 @@ export function ProductAR({ product }: { product: ProductData }) {
       {isOpen && (
         <FrameViewer
           product={product}
+          options={{ debug }}
           onClose={() => setIsOpen(false)}
           onPlace={(info) => console.log('Quadro posicionado em:', info.position)}
           onError={(err) => console.error(err.code, err.userMessage)}

@@ -23,10 +23,13 @@ export interface OverlayProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   /** Callback ref: os gestos do passthrough precisam reagir à montagem do palco. */
   stageRef: Ref<HTMLDivElement>;
+  /** Callback ref: a raiz vira o `domOverlay` da sessão WebXR quando ela monta. */
+  rootRef: Ref<HTMLDivElement>;
   onStart(): void;
   onClose(): void;
   onPhotoPrepare(): void;
   onPhoto(): void;
+  onReposition(): void;
   children?: React.ReactNode;
 }
 
@@ -35,14 +38,16 @@ export function Overlay({
   title,
   videoRef,
   stageRef,
+  rootRef,
   onStart,
   onClose,
   onPhotoPrepare,
   onPhoto,
+  onReposition,
   children,
 }: OverlayProps): React.ReactElement {
   const state = useViewerState();
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const uiRef = useRef<HTMLDivElement | null>(null);
 
   // O CSS é injetado em runtime (e não importado) para o consumidor de CDN não
   // precisar adicionar um <link>. `dist/overlay.css` segue disponível para quem
@@ -51,14 +56,21 @@ export function Overlay({
     injectStyles();
   }, []);
 
-  // Sem isto, tocar num botão do overlay também dispara `select` na sessão XR e
-  // o quadro se reposiciona junto com o clique em "Foto".
+  /**
+   * Sem isto, tocar num botão do overlay também dispara `select` na sessão XR e o
+   * quadro se reposiciona junto com o clique em "Foto".
+   *
+   * O alvo é `.fv-ui`, e NÃO `.fv-root`: a raiz é o `domOverlay` da sessão e cobre
+   * a tela inteira, então cancelar ali mataria o `select` de qualquer toque —
+   * inclusive o "toque para fixar". Como `.fv-ui` é `pointer-events: none` e só os
+   * controles são `auto`, o evento só passa por aqui quando o toque foi num botão.
+   */
   useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
+    const ui = uiRef.current;
+    if (!ui) return;
     const block = (ev: Event): void => ev.preventDefault();
-    root.addEventListener('beforexrselect', block);
-    return () => root.removeEventListener('beforexrselect', block);
+    ui.addEventListener('beforexrselect', block);
+    return () => ui.removeEventListener('beforexrselect', block);
   }, []);
 
   const hint = hintText(state.hint, t);
@@ -92,7 +104,19 @@ export function Overlay({
         {children}
       </div>
 
-      <div className="fv-ui">
+      <div className="fv-ui" ref={uiRef}>
+        {state.debug && (
+          <p className="fv-debug">
+            {`engine: ${state.debug.engine ?? '—'} · sensor: ${
+              state.debug.hasOrientation ? 'on' : 'off'
+            } · yaw: ${state.debug.yaw}`}
+            {state.debug.angles &&
+              ` · α ${state.debug.angles.alpha.toFixed(0)} β ${state.debug.angles.beta.toFixed(
+                0,
+              )} γ ${state.debug.angles.gamma.toFixed(0)}`}
+          </p>
+        )}
+
         <header className="fv-bar fv-bar--top">
           <p className="fv-title">{title ?? ''}</p>
           <button
@@ -135,17 +159,25 @@ export function Overlay({
         <p className="fv-hint">{hint}</p>
 
         <footer className="fv-bar fv-bar--bottom">
-          {/* pointerdown prepara o blob, click compartilha: o `navigator.share`
-              exige transient activation e não sobreviveria à espera do encode. */}
-          <button
-            type="button"
-            className="fv-btn fv-btn--icon fv-shot"
-            aria-label={t('photo')}
-            onPointerDown={onPhotoPrepare}
-            onClick={onPhoto}
-          >
-            📷
-          </button>
+          <div className="fv-actions">
+            {/* Único caminho para soltar o quadro depois de fixado. O CSS o
+                mostra apenas em `data-fv-state="placed"`. */}
+            <button type="button" className="fv-btn fv-reposition" onClick={onReposition}>
+              {t('reposition')}
+            </button>
+
+            {/* pointerdown prepara o blob, click compartilha: o `navigator.share`
+                exige transient activation e não sobreviveria à espera do encode. */}
+            <button
+              type="button"
+              className="fv-btn fv-btn--icon fv-shot"
+              aria-label={t('photo')}
+              onPointerDown={onPhotoPrepare}
+              onClick={onPhoto}
+            >
+              📷
+            </button>
+          </div>
           <p className="fv-privacy">{t('privacy')}</p>
         </footer>
       </div>

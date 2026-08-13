@@ -57,6 +57,7 @@ export type ARHint =
   | 'tap-to-place'
   | 'no-wall-found'
   | 'drag-to-move'
+  | 'no-yaw'
   | 'placed';
 
 export interface PlacementInfo {
@@ -86,6 +87,8 @@ export interface ViewerOptions {
   wallToleranceDeg?: number;
   /** URL de um build ESM do three, para ambientes com CSP restritiva. */
   threeUrl?: string;
+  /** Mostra no overlay o engine ativo e o estado dos sensores. Padrão false. */
+  debug?: boolean;
   locale?: 'pt-BR' | 'en';
   /** Sobrescreve textos individuais do overlay. */
   strings?: Partial<Record<string, string>>;

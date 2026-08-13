@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { ARError } from '../core/errors';
+import type { DeviceAngles, YawStatus } from '../core/passthrough/orientation';
 import type { ARHint, ARStatus, SceneKind } from '../core/types';
 
 /**
@@ -33,6 +34,16 @@ export interface PanelState {
   actions: PanelAction[];
 }
 
+/** Leitura de diagnóstico do overlay. Preenchida só com `options.debug`. */
+export interface DebugInfo {
+  engine: SceneKind | null;
+  /** Houve permissão e há evento de orientação chegando. */
+  hasOrientation: boolean;
+  /** Últimos ângulos recebidos. Null no WebXR, que não usa o giroscópio. */
+  angles: DeviceAngles | null;
+  yaw: YawStatus;
+}
+
 export interface ViewerState {
   status: ARStatus;
   engine: SceneKind | null;
@@ -40,6 +51,7 @@ export interface ViewerState {
   panel: PanelState | null;
   canCapture: boolean;
   error: ARError | null;
+  debug: DebugInfo | null;
 }
 
 export const INITIAL_STATE: ViewerState = {
@@ -49,6 +61,7 @@ export const INITIAL_STATE: ViewerState = {
   panel: null,
   canCapture: false,
   error: null,
+  debug: null,
 };
 
 export interface ViewerStore {

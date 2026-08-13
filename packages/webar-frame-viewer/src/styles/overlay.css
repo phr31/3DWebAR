@@ -65,6 +65,13 @@
   gap: 8px;
 }
 
+.fv-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
 .fv-title {
   margin: 0;
   font-size: 15px;
@@ -178,6 +185,17 @@
   transition: opacity 0.2s;
 }
 
+.fv-debug {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+}
+
 .fv-privacy {
   margin: 0;
   font-size: 11px;
@@ -222,6 +240,36 @@
 /* No WebXR não existe <video>: o compositor XR desenha a câmera. */
 .fv-root[data-fv-engine="webxr"] .fv-video {
   display: none;
+}
+
+/* Dentro da sessão, esta é a raiz do `dom-overlay` e é composta SOBRE a imagem da
+   câmera do compositor XR — o fundo preto que esconde a página aqui esconderia a
+   cena inteira. `:xr-overlay` só casa enquanto a sessão está no ar, que é
+   exatamente a janela em que a transparência é desejada. Regra isolada de
+   propósito: navegador que não conhece o seletor descarta o bloco inteiro, e este
+   bloco não pode levar mais nada junto. */
+/* biome-ignore lint/correctness/noUnknownPseudoClass: `:xr-overlay` é da spec de
+   WebXR DOM Overlays, ainda ausente da lista do Biome. */
+.fv-root:xr-overlay {
+  background: transparent;
+}
+
+/* Mesmo motivo: o canvas é só a fonte da XRWebGLLayer durante a sessão — quem
+   desenha é o compositor. O que sobrou nele é lixo de antes de entrar no AR.
+   `opacity` e não `display: none`: esconder o elemento que serve de layer é
+   território cinzento, zerar a opacidade não toca no caminho de render do XR. */
+/* biome-ignore lint/correctness/noUnknownPseudoClass: ver acima. */
+.fv-root:xr-overlay .fv-canvas {
+  opacity: 0;
+}
+
+/* "Reposicionar" só existe com o quadro fixado: é o caminho de volta. */
+.fv-reposition {
+  display: none;
+}
+
+.fv-root[data-fv-state="placed"] .fv-reposition {
+  display: inline-flex;
 }
 
 /* Captura é impossível dentro de uma XRSession — o botão nem aparece. */

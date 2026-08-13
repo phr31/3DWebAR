@@ -29,6 +29,11 @@ export interface PassthroughPlacementResult {
   /** Aplicado ao grupo do quadro dentro do `useFrame`. */
   apply(group: THREE.Object3D, placed: boolean): void;
   place(): void;
+  /**
+   * Destrava mantendo onde está. Diferente de `reset()`, que devolve o quadro ao
+   * ponto inicial — quem toca em "Reposicionar" quer continuar de onde parou.
+   */
+  unplace(): void;
   reset(): void;
 }
 
@@ -81,6 +86,9 @@ export function usePassthroughPlacement({
           position: { x: position.x, y: position.y, z: position.z },
         });
       },
+      unplace() {
+        placedRef.current = false;
+      },
       reset() {
         placedRef.current = false;
         rollRef.current = 0;
@@ -106,7 +114,10 @@ export function usePassthroughPlacement({
     const gestures = new GestureController(
       target,
       {
+        // Fixado é fixado: enquanto travado nenhum gesto move a peça. Sem isto o
+        // "lock" seria só cosmético — arrastar continuaria deslocando o quadro.
         onPan(dxPx, dyPx) {
+          if (placedRef.current) return;
           const perPixel = worldPerPixel(
             distanceRef.current,
             (latest.current.camera as THREE.PerspectiveCamera).fov,
@@ -126,12 +137,14 @@ export function usePassthroughPlacement({
          * screenshot mente.
          */
         onPinch(factor) {
+          if (placedRef.current) return;
           const previous = distanceRef.current;
           distanceRef.current = clamp(previous / factor, MIN_DISTANCE_M, MAX_DISTANCE_M);
           const ratio = distanceRef.current / previous;
           position.multiplyScalar(ratio);
         },
         onRotate(delta) {
+          if (placedRef.current) return;
           rollRef.current += delta;
         },
         onTap() {

@@ -562,6 +562,7 @@ Na API React não existe `container`: o `<FrameViewer>` é o próprio elemento.
 | `noHitTimeoutMs` | `number` | `6000` | Tempo sem hit válido antes de oferecer posicionamento manual |
 | `wallToleranceDeg` | `number` | `15` | Tolerância angular para aceitar uma superfície como parede |
 | `threeUrl` | `string` | — | URL de um build ESM do `three`, para ambientes com CSP restritiva |
+| `debug` | `boolean` | `false` | Mostra no overlay o engine ativo e o estado dos sensores (`.fv-debug`) |
 | `locale` | `'pt-BR' \| 'en'` | `'pt-BR'` | Idioma dos textos do overlay |
 | `strings` | `Partial<Record<string, string>>` | `{}` | Sobrescreve textos individuais — ver [Textos e idiomas](#textos-e-idiomas) |
 | `onReady` | `() => void` | — | Disparado quando o estado chega a `'ready'` |
@@ -642,8 +643,8 @@ stateDiagram-v2
     loading --> placing: autoPlaceOnPlane
     loading --> ready: autoPlaceOnPlane = false
     ready --> placing
-    placing --> placed: place()
-    placed --> placing: reset()
+    placing --> placed: place() — toque na tela
+    placed --> placing: reset() — botão "Reposicionar"
     placing --> paused: pause()
     placed --> paused: pause()
     paused --> ready: resume()
@@ -811,6 +812,7 @@ div.fv-root                        [role=dialog] [aria-modal=true]
 │   ├── video.fv-video             imagem da câmera (oculta no engine WebXR)
 │   └── canvas.fv-canvas           a cena 3D
 └── div.fv-ui                      pointer-events: none
+    ├── p.fv-debug                 só com options.debug
     ├── header.fv-bar.fv-bar--top
     │   ├── p.fv-title
     │   └── button.fv-btn.fv-btn--icon.fv-close
@@ -823,7 +825,9 @@ div.fv-root                        [role=dialog] [aria-modal=true]
     │       └── div.fv-panel__actions
     ├── p.fv-hint
     └── footer.fv-bar.fv-bar--bottom
-        ├── button.fv-btn.fv-btn--icon.fv-shot
+        ├── div.fv-actions
+        │   ├── button.fv-btn.fv-reposition   só em data-fv-state="placed"
+        │   └── button.fv-btn.fv-btn--icon.fv-shot
         └── p.fv-privacy
 ```
 
@@ -897,7 +901,8 @@ sobrescrita por `options.strings`:
 | `hint.tap-to-place` | Toque para posicionar | Tap to place |
 | `hint.no-wall-found` | Não encontramos a parede. Tente apontar perto de um canto, um interruptor ou o batente da porta. | We could not find the wall. Try aiming near a corner, a light switch or a door frame. |
 | `hint.drag-to-move` | Arraste para mover · pince para ajustar a distância | Drag to move · pinch to adjust the distance |
-| `hint.placed` | Pronto! Toque de novo para reposicionar. | Done! Tap again to reposition. |
+| `hint.no-yaw` | Seu aparelho não rastreia giros na horizontal. Mantenha o celular parado, arraste o quadro e toque para fixar. | Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it. |
+| `hint.placed` | Quadro fixado. Use "Reposicionar" para mover. | Frame locked. Use "Reposition" to move it. |
 
 As chaves `hint.*` correspondem 1:1 aos valores de `ARHint`.
 

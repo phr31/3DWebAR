@@ -11,6 +11,7 @@ import {
   applyDeviceAngles,
   type DeviceAngles,
   listenToOrientation,
+  type YawStatus,
 } from '../../core/passthrough/orientation';
 import type { ResolvedOptions } from '../../core/types';
 
@@ -39,6 +40,14 @@ export interface PassthroughResult {
   readyRef: RefObject<boolean>;
   /** Chamado pelo `useFrame` do componente de cena. */
   update(time: number): void;
+  /** Últimos ângulos do sensor. Lidos no `useFrame` — para o HUD de debug. */
+  anglesRef: RefObject<DeviceAngles | null>;
+  hasOrientationRef: RefObject<boolean>;
+  /**
+   * Saúde da guinada. `dead` significa que não há rastreamento horizontal e o
+   * quadro vai parecer colado ao visor por mais correta que seja a matemática.
+   */
+  yawRef: RefObject<YawStatus>;
 }
 
 export function usePassthrough({
@@ -58,6 +67,7 @@ export function usePassthrough({
   const readyRef = useRef(false);
   const anglesRef = useRef<DeviceAngles | null>(null);
   const hasOrientationRef = useRef(false);
+  const yawRef = useRef<YawStatus>('unknown');
 
   const latest = useRef({ onError, onLost, onAmbient, options });
   latest.current = { onError, onLost, onAmbient, options };
@@ -108,8 +118,9 @@ export function usePassthrough({
       }
 
       stopOrientation = await listenToOrientation(
-        (angles) => {
+        (angles, yaw) => {
           anglesRef.current = angles;
+          yawRef.current = yaw;
         },
         () => cancelled,
       );
@@ -170,6 +181,9 @@ export function usePassthrough({
   return useMemo(
     () => ({
       readyRef,
+      anglesRef,
+      hasOrientationRef,
+      yawRef,
       update(time: number) {
         const video = videoRef.current;
         if (!video) return;

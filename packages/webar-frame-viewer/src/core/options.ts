@@ -12,6 +12,7 @@ export function resolveOptions(options: ViewerOptions = {}): ResolvedOptions {
     assumedWallDistanceM: options.assumedWallDistanceM ?? 2,
     noHitTimeoutMs: options.noHitTimeoutMs ?? 6000,
     wallToleranceDeg: options.wallToleranceDeg ?? 15,
+    debug: options.debug ?? false,
     locale: options.locale ?? 'pt-BR',
     engine: options.engine,
     threeUrl: options.threeUrl,

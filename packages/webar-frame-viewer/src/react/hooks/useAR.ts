@@ -5,7 +5,7 @@ import { type CapabilityReport, detectCapabilities } from '../../core/capabiliti
 import { ARError, normalizeError, userMessage } from '../../core/errors';
 import type { ARHint, PlacementInfo, ResolvedOptions, SceneKind } from '../../core/types';
 import type { StringKey } from '../../ui/strings';
-import { useViewerStore } from '../store';
+import { type DebugInfo, useViewerStore } from '../store';
 
 /**
  * Orquestrador da experiência: decide o engine, controla o ciclo de vida e é o
@@ -46,6 +46,15 @@ export interface ARApi {
   reportEngineReady(kind: SceneKind, canCapture: boolean): void;
   dismissPanel(): void;
   enableManualPlacement(): void;
+  /**
+   * A cena ativa publica aqui como destravar o quadro; o botão "Reposicionar" do
+   * overlay é o único caminho de volta. Passar `null` no unmount.
+   */
+  registerReposition(handler: (() => void) | null): void;
+  /** Acionado pelo overlay. Sem cena registrada, não faz nada. */
+  reposition(): void;
+  /** Leitura de diagnóstico do HUD (`options.debug`). */
+  setDebug(info: DebugInfo | null): void;
   manualModeRef: React.RefObject<boolean>;
 }
 
@@ -53,6 +62,7 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
   const store = useViewerStore();
   const capabilitiesRef = useRef<CapabilityReport | null>(null);
   const manualModeRef = useRef(false);
+  const repositionRef = useRef<(() => void) | null>(null);
   const startingRef = useRef(false);
   // Declarados aqui porque `fail` (definido antes de `start`) precisa reiniciar.
   const startRef = useRef<((enterXR: () => Promise<unknown>) => Promise<void>) | null>(null);
@@ -250,6 +260,23 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
     store.set({ status: 'placing', hint: 'scan' });
   }, [store]);
 
+  const registerReposition = useCallback((handler: (() => void) | null) => {
+    repositionRef.current = handler;
+  }, []);
+
+  // Quem destrava de fato é a cena: só ela sabe se precisa soltar a âncora XR ou
+  // apenas reabrir os gestos. Aqui é só o encaminhamento.
+  const reposition = useCallback(() => {
+    repositionRef.current?.();
+  }, []);
+
+  const setDebug = useCallback(
+    (info: DebugInfo | null) => {
+      store.set({ debug: info });
+    },
+    [store],
+  );
+
   const dismissPanel = useCallback(() => {
     store.set({ panel: null, status: 'placing' });
   }, [store]);
@@ -283,6 +310,9 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
       fail,
       dismissPanel,
       enableManualPlacement,
+      registerReposition,
+      reposition,
+      setDebug,
       manualModeRef,
     }),
     [
@@ -297,6 +327,9 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
       fail,
       dismissPanel,
       enableManualPlacement,
+      registerReposition,
+      reposition,
+      setDebug,
     ],
   );
 }

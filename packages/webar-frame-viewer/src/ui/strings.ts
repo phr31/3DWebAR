@@ -16,6 +16,7 @@ export type StringKey =
   | 'hint.tap-to-place'
   | 'hint.no-wall-found'
   | 'hint.drag-to-move'
+  | 'hint.no-yaw'
   | 'hint.placed';
 
 const PT: Record<StringKey, string> = {
@@ -38,7 +39,11 @@ const PT: Record<StringKey, string> = {
   'hint.no-wall-found':
     'Não encontramos a parede. Tente apontar perto de um canto, um interruptor ou o batente da porta.',
   'hint.drag-to-move': 'Arraste para mover · pince para ajustar a distância',
-  'hint.placed': 'Pronto! Toque de novo para reposicionar.',
+  // Sem giroscópio/bússola não há rastreamento horizontal. Dizer isso é melhor do
+  // que deixar o usuário achar que o quadro está escorregando.
+  'hint.no-yaw':
+    'Seu aparelho não rastreia giros na horizontal. Mantenha o celular parado, arraste o quadro e toque para fixar.',
+  'hint.placed': 'Quadro fixado. Use "Reposicionar" para mover.',
 };
 
 const EN: Record<StringKey, string> = {
@@ -58,7 +63,9 @@ const EN: Record<StringKey, string> = {
   'hint.no-wall-found':
     'We could not find the wall. Try aiming near a corner, a light switch or a door frame.',
   'hint.drag-to-move': 'Drag to move · pinch to adjust the distance',
-  'hint.placed': 'Done! Tap again to reposition.',
+  'hint.no-yaw':
+    'Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it.',
+  'hint.placed': 'Frame locked. Use "Reposition" to move it.',
 };
 
 export function createStrings(

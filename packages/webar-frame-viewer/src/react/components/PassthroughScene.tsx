@@ -5,11 +5,15 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
 import type * as THREE from 'three';
 import type { LoadedTexture } from '../../core/AssetLoader';
 import type { ARError } from '../../core/errors';
+import type { YawStatus } from '../../core/passthrough/orientation';
 import type { FrameStyle, ProductData, ResolvedOptions } from '../../core/types';
 import type { ARApi } from '../hooks/useAR';
 import { usePassthrough } from '../hooks/usePassthrough';
 import { usePassthroughPlacement } from '../hooks/usePassthroughPlacement';
 import { FrameModel } from './FrameModel';
+
+/** Período do HUD de debug e da leitura do yaw. 4 Hz não pesa no render. */
+const DEBUG_INTERVAL_MS = 250;
 
 /**
  * Cena do caminho de passthrough (iOS e qualquer aparelho sem WebXR).
@@ -43,7 +47,9 @@ export function PassthroughScene({
   const placedRef = useRef(false);
   const [placed, setPlaced] = useState(false);
   const [ambient, setAmbient] = useState(1);
+  const [yaw, setYaw] = useState<YawStatus>('unknown');
   const readyReportedRef = useRef(false);
+  const lastDebugAtRef = useRef(0);
 
   const onError = useCallback((error: ARError) => api.fail(error, 'camera'), [api]);
   const onLost = useCallback(() => api.fail(new Error('camera track ended'), 'runtime'), [api]);
@@ -67,11 +73,29 @@ export function PassthroughScene({
     },
   });
 
-  // O passthrough é o único engine que consegue capturar: o vídeo e o canvas
-  // WebGL são ambos nossos, então dá para compor os dois.
+  // Destravar é decisão explícita do usuário pelo botão "Reposicionar": um toque
+  // na tela só fixa. A posição atual é preservada — quem reposiciona continua de
+  // onde parou, e não do centro.
   useEffect(() => {
+    api.registerReposition(() => {
+      placedRef.current = false;
+      placement.unplace();
+      setPlaced(false);
+      api.reportUnplaced();
+    });
+    return () => api.registerReposition(null);
+  }, [api, placement]);
+
+  useEffect(() => {
+    if (placed) return;
+    // Sem guinada não existe rastreamento horizontal: dizer isso vale mais do que
+    // repetir "arraste para mover".
+    if (yaw === 'dead') {
+      api.setHint('no-yaw');
+      return;
+    }
     api.setHint(options.autoPlaceOnPlane ? 'drag-to-move' : 'tap-to-place');
-  }, [api, options.autoPlaceOnPlane]);
+  }, [api, options.autoPlaceOnPlane, placed, yaw]);
 
   useFrame((_state, _delta) => {
     const group = groupRef.current;
@@ -85,6 +109,22 @@ export function PassthroughScene({
     if (passthrough.readyRef.current && !readyReportedRef.current) {
       readyReportedRef.current = true;
       api.reportEngineReady('passthrough', true);
+    }
+
+    // Amostragem throttled: ler o sensor a 60 Hz para a interface só geraria
+    // render à toa.
+    if (now - lastDebugAtRef.current >= DEBUG_INTERVAL_MS) {
+      lastDebugAtRef.current = now;
+      const current = passthrough.yawRef.current;
+      if (current !== yaw) setYaw(current);
+      if (options.debug) {
+        api.setDebug({
+          engine: 'passthrough',
+          hasOrientation: passthrough.hasOrientationRef.current,
+          angles: passthrough.anglesRef.current,
+          yaw: current,
+        });
+      }
     }
 
     placement.apply(group, placedRef.current);

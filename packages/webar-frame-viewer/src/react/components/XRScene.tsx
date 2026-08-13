@@ -53,13 +53,16 @@ export function XRScene({ product, art, style, options, api }: XRSceneProps): Re
   const [metrics, setMetrics] = useState<FrameMetrics | null>(null);
   const [ambient, setAmbient] = useState(1);
   const [stable, setStable] = useState(false);
+  // Par ref+state: a ref é lida no `useFrame`, o state é o que a interface vê.
+  // Só com o state a opacidade sai de 0.85 e o botão "Reposicionar" aparece.
+  const [placed, setPlaced] = useState(false);
 
   const [anchor, createAnchor] = useXRAnchor();
 
   const hitTest = useHitTest({
     wallToleranceDeg: options.wallToleranceDeg,
     noHitTimeoutMs: options.noHitTimeoutMs,
-    enabled: !placedRef.current,
+    enabled: !placed,
     manualMode: api.manualModeRef.current,
     onHint: api.setHint,
   });
@@ -70,6 +73,13 @@ export function XRScene({ product, art, style, options, api }: XRSceneProps): Re
   useEffect(() => {
     if (session) api.reportEngineReady('webxr', false);
   }, [session, api]);
+
+  // O WebXR não usa o giroscópio da página: o rastreamento é 6-DoF do runtime.
+  useEffect(() => {
+    if (!options.debug) return;
+    api.setDebug({ engine: 'webxr', hasOrientation: session != null, angles: null, yaw: 'ok' });
+    return () => api.setDebug(null);
+  }, [api, options.debug, session]);
 
   // Light probe: opcional, pode não ter sido concedida.
   useEffect(() => {
@@ -92,6 +102,7 @@ export function XRScene({ product, art, style, options, api }: XRSceneProps): Re
     if (!group || !hitTest.hasCandidateRef.current) return;
 
     placedRef.current = true;
+    setPlaced(true);
 
     // Anchors reduzem materialmente o drift depois de 30 s parado — e o usuário
     // fica bastante tempo olhando para o quadro. Falha é aceitável: a feature
@@ -118,21 +129,29 @@ export function XRScene({ product, art, style, options, api }: XRSceneProps): Re
 
   const reset = useCallback(() => {
     placedRef.current = false;
+    setPlaced(false);
     setStable(false);
     hitTest.restart();
     api.reportUnplaced();
   }, [api, hitTest]);
 
-  // Toque na tela: alterna entre fixar e reposicionar.
+  // Toque na tela: SÓ fixa. Destravar é pelo botão "Reposicionar" — antes, um
+  // toque acidental depois de fixar devolvia o quadro a seguir a câmera, que é
+  // exatamente a sensação de "o quadro não trava".
   useEffect(() => {
     if (!session) return;
     const onSelect = (): void => {
-      if (placedRef.current) reset();
-      else if (hitTest.hasCandidateRef.current) place();
+      if (placedRef.current) return;
+      if (hitTest.hasCandidateRef.current) place();
     };
     session.addEventListener('select', onSelect);
     return () => session.removeEventListener('select', onSelect);
-  }, [session, place, reset, hitTest]);
+  }, [session, place, hitTest]);
+
+  useEffect(() => {
+    api.registerReposition(reset);
+    return () => api.registerReposition(null);
+  }, [api, reset]);
 
   useFrame((_state, _delta, xrFrame) => {
     const group = groupRef.current;
@@ -221,7 +240,7 @@ export function XRScene({ product, art, style, options, api }: XRSceneProps): Re
         style={style}
         ambient={ambient}
         // 0.85 enquanto segue o plano deixa claro que ainda não está fixado.
-        opacity={placedRef.current || !options.autoPlaceOnPlane ? 1 : 0.85}
+        opacity={placed || !options.autoPlaceOnPlane ? 1 : 0.85}
         visible={false}
         onMetrics={setMetrics}
       />

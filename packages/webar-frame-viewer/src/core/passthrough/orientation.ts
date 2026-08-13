@@ -16,6 +16,18 @@ export interface DeviceAngles {
   gamma: number;
 }
 
+/**
+ * Saúde da guinada (yaw).
+ *
+ * - `unknown`: ainda coletando amostras.
+ * - `ok`: `alpha` responde ao giro horizontal.
+ * - `dead`: o aparelho inclina (beta/gamma variam) mas `alpha` fica parado. Sem
+ *   giroscópio/bússola utilizáveis não existe rastreamento horizontal, e o quadro
+ *   fica colado ao visor por mais correta que a matemática esteja. Quem consome
+ *   precisa saber para avisar o usuário em vez de fingir AR.
+ */
+export type YawStatus = 'unknown' | 'ok' | 'dead';
+
 /** Conversão canônica de DeviceOrientationEvent para quaternion de câmera. */
 export function orientationQuaternion(
   three: ThreeNS,
@@ -57,15 +69,115 @@ export function currentScreenAngle(): number {
   );
 }
 
+/** Silêncio da fonte absoluta que a faz perder a preferência. */
+const ABSOLUTE_TTL_MS = 1000;
+/** Janela de observação do detector de yaw. */
+const YAW_WINDOW_MS = 4000;
+/** Abaixo disto, no acumulado da janela, `alpha` está parado. */
+const YAW_MIN_TRAVEL_DEG = 1;
+/** O veredito só vale se o aparelho realmente se moveu na janela. */
+const TILT_MIN_TRAVEL_DEG = 5;
+
+/** Menor diferença com sinal entre dois ângulos em graus, tratando a volta em 360. */
+function angleDelta(from: number, to: number): number {
+  return ((((to - from) % 360) + 540) % 360) - 180;
+}
+
+/**
+ * Decide se a guinada do aparelho é utilizável, observando quanto `alpha` andou
+ * enquanto `beta`/`gamma` andavam.
+ *
+ * Puro e sem I/O de propósito: a decisão é o que interessa testar, e ela também
+ * roda no engine imperativo do build UMD.
+ */
+export class YawWatcher {
+  private status: YawStatus = 'unknown';
+  private windowStart = 0;
+  private alphaTravel = 0;
+  private tiltTravel = 0;
+  private previous: DeviceAngles | null = null;
+
+  get current(): YawStatus {
+    return this.status;
+  }
+
+  reset(): void {
+    this.status = 'unknown';
+    this.previous = null;
+    this.windowStart = 0;
+    this.alphaTravel = 0;
+    this.tiltTravel = 0;
+  }
+
+  sample(angles: DeviceAngles, now: number): YawStatus {
+    const previous = this.previous;
+    this.previous = angles;
+
+    if (!previous) {
+      this.windowStart = now;
+      return this.status;
+    }
+
+    this.alphaTravel += Math.abs(angleDelta(previous.alpha, angles.alpha));
+    this.tiltTravel +=
+      Math.abs(angleDelta(previous.beta, angles.beta)) +
+      Math.abs(angleDelta(previous.gamma, angles.gamma));
+
+    // `ok` é definitivo: um sensor que já respondeu não passa a não existir. O
+    // contrário não vale — o veredito `dead` continua sendo revisto a cada janela.
+    if (this.alphaTravel >= YAW_MIN_TRAVEL_DEG) {
+      this.status = 'ok';
+      this.startWindow(now);
+      return this.status;
+    }
+
+    if (now - this.windowStart < YAW_WINDOW_MS) return this.status;
+
+    if (this.tiltTravel >= TILT_MIN_TRAVEL_DEG) this.status = 'dead';
+    this.startWindow(now);
+    return this.status;
+  }
+
+  private startWindow(now: number): void {
+    this.windowStart = now;
+    this.alphaTravel = 0;
+    this.tiltTravel = 0;
+  }
+}
+
+/** Extração dos ângulos de um evento, já resolvendo a bússola do Safari. */
+function readEvent(ev: DeviceOrientationEvent): { angles: DeviceAngles; absolute: boolean } | null {
+  if (ev.beta == null || ev.gamma == null) return null;
+
+  // `webkitCompassHeading` é o yaw ABSOLUTO do iOS, medido em sentido horário a
+  // partir do norte — o inverso da convenção de `alpha`. É a única fonte de yaw
+  // confiável no Safari, onde `alpha` é relativo ao início da sessão e deriva.
+  const heading = (ev as DeviceOrientationEvent & { webkitCompassHeading?: number })
+    .webkitCompassHeading;
+  if (typeof heading === 'number' && Number.isFinite(heading)) {
+    return { angles: { alpha: 360 - heading, beta: ev.beta, gamma: ev.gamma }, absolute: true };
+  }
+
+  if (ev.alpha == null) return null;
+  return { angles: { alpha: ev.alpha, beta: ev.beta, gamma: ev.gamma }, absolute: ev.absolute };
+}
+
 /**
  * Pede a permissão de giroscópio do iOS 13+ e passa a escutar. Devolve a função
  * de limpeza, ou null se o giroscópio não estiver disponível/autorizado.
+ *
+ * Escuta os DOIS eventos: `deviceorientationabsolute` (Chrome/Android, orientação
+ * referenciada ao norte) e `deviceorientation` (relativo). Enquanto a absoluta
+ * estiver reportando, ela ganha — a relativa depende do sensor de orientação
+ * relativa, que exige giroscópio e é justamente o que falta nos aparelhos onde o
+ * quadro cola no visor. Se a absoluta calar por mais de `ABSOLUTE_TTL_MS`, a
+ * relativa reassume: pior referência é melhor do que cena congelada.
  *
  * `isCancelled` é consultado após o await da permissão: o usuário pode fechar o
  * visualizador enquanto o diálogo está aberto.
  */
 export async function listenToOrientation(
-  onAngles: (angles: DeviceAngles) => void,
+  onAngles: (angles: DeviceAngles, yaw: YawStatus) => void,
   isCancelled: () => boolean = () => false,
 ): Promise<(() => void) | null> {
   const ctor = window.DeviceOrientationEvent as
@@ -83,10 +195,40 @@ export async function listenToOrientation(
   }
   if (isCancelled()) return null;
 
-  const handler = (ev: DeviceOrientationEvent): void => {
-    if (ev.alpha == null || ev.beta == null || ev.gamma == null) return;
-    onAngles({ alpha: ev.alpha, beta: ev.beta, gamma: ev.gamma });
+  const watcher = new YawWatcher();
+  let lastAbsoluteAt = 0;
+
+  const handle = (ev: DeviceOrientationEvent, fromAbsoluteEvent: boolean): void => {
+    const read = readEvent(ev);
+    if (!read) return;
+
+    const now = performance.now();
+    const absolute = fromAbsoluteEvent || read.absolute;
+
+    if (absolute) {
+      // Trocar de fonte muda a referência de `alpha`: o histórico não vale mais.
+      if (now - lastAbsoluteAt > ABSOLUTE_TTL_MS) watcher.reset();
+      lastAbsoluteAt = now;
+    } else if (now - lastAbsoluteAt <= ABSOLUTE_TTL_MS) {
+      // A absoluta está viva e é melhor: ignora a relativa.
+      return;
+    } else if (lastAbsoluteAt !== 0) {
+      // A absoluta calou (a bússola do iOS some quando descalibra). Voltar para a
+      // relativa é melhor do que congelar a cena.
+      lastAbsoluteAt = 0;
+      watcher.reset();
+    }
+
+    onAngles(read.angles, watcher.sample(read.angles, now));
   };
-  window.addEventListener('deviceorientation', handler);
-  return () => window.removeEventListener('deviceorientation', handler);
+
+  const onRelative = (ev: DeviceOrientationEvent): void => handle(ev, false);
+  const onAbsolute = (ev: DeviceOrientationEvent): void => handle(ev, true);
+
+  window.addEventListener('deviceorientation', onRelative);
+  window.addEventListener('deviceorientationabsolute', onAbsolute as EventListener);
+  return () => {
+    window.removeEventListener('deviceorientation', onRelative);
+    window.removeEventListener('deviceorientationabsolute', onAbsolute as EventListener);
+  };
 }
