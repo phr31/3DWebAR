@@ -8,8 +8,14 @@ import { clamp, wallBasis, worldPerPixel } from '../../core/TransformUtils';
 import type { PlacementInfo, ResolvedOptions } from '../../core/types';
 
 /**
- * Posicionamento por gestos no passthrough: arrastar move, pinça ajusta a
- * distância, dois dedos giram, toque fixa.
+ * Posicionamento por gestos no passthrough, no mesmo fluxo do WebXR: nada
+ * aparece até o dedo encostar, o quadro nasce no ponto tocado e o toque fixa.
+ * Depois de fixado é que valem o ajuste fino (arrastar), a pinça de distância e
+ * a rotação.
+ *
+ * Aqui não existe hit-test: sem sessão XR não há profundidade medida, então a
+ * distância é sempre a assumida. O que o toque garante é a DIREÇÃO — o quadro
+ * fica onde o usuário apontou.
  *
  * Reaproveita o `GestureController` (Pointer Events, tap = <12 px e <400 ms) e a
  * matemática de `TransformUtils`, iguais ao build UMD.
@@ -28,9 +34,12 @@ export interface PassthroughPlacementOptions {
 export interface PassthroughPlacementResult {
   /**
    * Aplicado ao grupo do quadro dentro do `useFrame`. `anchored` é o estado do
-   * TOQUE (parou de se virar para o usuário), não o do cadeado.
+   * TOQUE (parou de se virar para o usuário), não o do cadeado. Também controla
+   * a visibilidade: antes do primeiro toque não há nada para mostrar.
    */
   apply(group: THREE.Object3D, anchored: boolean): void;
+  /** True depois do primeiro toque — o quadro já está na cena. */
+  isVisible(): boolean;
   place(): void;
   /**
    * Trava/destrava os gestos mantendo a pose. Destravar não devolve o quadro ao
@@ -62,14 +71,18 @@ export function usePassthroughPlacement({
   // gestos. Entre os dois estados fica o ajuste fino.
   const placedRef = useRef(false);
   const lockedRef = useRef(false);
+  /** Só depois do primeiro toque existe quadro na tela. */
+  const visibleRef = useRef(false);
 
   const latest = useRef({ options, onPlace, camera, size });
   latest.current = { options, onPlace, camera, size };
 
   const api = useMemo<PassthroughPlacementResult>(
     () => ({
+      isVisible: () => visibleRef.current,
       apply(group, anchored) {
         placedRef.current = anchored;
+        group.visible = visibleRef.current;
         group.position.copy(position);
 
         if (!anchored) {
@@ -100,13 +113,17 @@ export function usePassthroughPlacement({
       setLocked(locked) {
         lockedRef.current = locked;
       },
+      // "Reposicionar" volta ao começo do fluxo: tela limpa esperando o toque,
+      // igual ao WebXR. A pose fica guardada, mas o próximo toque a substitui.
       unplace() {
         placedRef.current = false;
         lockedRef.current = false;
+        visibleRef.current = false;
       },
       reset() {
         placedRef.current = false;
         lockedRef.current = false;
+        visibleRef.current = false;
         rollRef.current = 0;
         distanceRef.current = latest.current.options.assumedWallDistanceM;
         position.set(0, 0, -distanceRef.current);
@@ -130,12 +147,47 @@ export function usePassthroughPlacement({
     const gestures = new GestureController(
       target,
       {
+        /**
+         * Antes de fixar, o quadro vai para onde o dedo está: desprojeta o ponto
+         * tocado e o joga na distância assumida. A matriz de projeção aqui é a
+         * que o `usePassthrough` casou com a área visível do vídeo, então o ponto
+         * na tela corresponde ao ponto na parede que o usuário está vendo.
+         */
+        onAim(x, y, phase) {
+          if (placedRef.current) return;
+          // Soltar o dedo fixa, como no WebXR. `onTap` sozinho não bastaria:
+          // segurar e arrastar até o ponto certo não é um tap.
+          if (phase === 'end') {
+            if (visibleRef.current) api.place();
+            return;
+          }
+          const { camera } = latest.current;
+          const rect = target.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+
+          const ndc = new THREE.Vector3(
+            ((x - rect.left) / rect.width) * 2 - 1,
+            -((y - rect.top) / rect.height) * 2 + 1,
+            0.5,
+          ).unproject(camera);
+
+          const origin = new THREE.Vector3();
+          camera.getWorldPosition(origin);
+          const direction = ndc.sub(origin);
+          if (direction.lengthSq() < 1e-8) return;
+
+          position.copy(origin).addScaledVector(direction.normalize(), distanceRef.current);
+          visibleRef.current = true;
+        },
         // Travado é travado: com o cadeado fechado nenhum gesto move a peça. Sem
         // isto o "lock" seria só cosmético — arrastar continuaria deslocando o
         // quadro. Note que o gate é o cadeado, e NÃO o toque: entre ancorar e
         // travar o arraste é justamente o que se quer.
+        //
+        // Antes de fixar quem manda é a mira (posição absoluta); somar o delta do
+        // arraste por cima moveria o quadro duas vezes no mesmo gesto.
         onPan(dxPx, dyPx) {
-          if (lockedRef.current) return;
+          if (lockedRef.current || !placedRef.current) return;
           const perPixel = worldPerPixel(
             distanceRef.current,
             (latest.current.camera as THREE.PerspectiveCamera).fov,
@@ -165,12 +217,10 @@ export function usePassthroughPlacement({
           if (lockedRef.current) return;
           rollRef.current += delta;
         },
-        // O toque SÓ ancora. Depois de ancorado ele não faz mais nada — soltar é
-        // decisão explícita no cadeado, senão um toque acidental devolveria o
-        // quadro a seguir a câmera, que é a sensação de "o quadro não trava".
-        onTap() {
-          if (!placedRef.current) api.place();
-        },
+        // Não há `onTap`: quem ancora é o fim da mira, acima. Depois de ancorado
+        // nenhum toque desfaz nada — soltar é decisão explícita no cadeado,
+        // senão um toque acidental devolveria o quadro a seguir a câmera, que é
+        // a sensação de "o quadro não trava".
       },
       { move: true, scale: allowScale, rotate: allowRotate },
     );

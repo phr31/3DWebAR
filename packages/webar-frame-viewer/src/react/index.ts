@@ -38,6 +38,11 @@ export {
   type PassthroughPlacementResult,
   usePassthroughPlacement,
 } from './hooks/usePassthroughPlacement';
+export {
+  type TouchHitTestOptions,
+  type TouchHitTestResult,
+  useTouchHitTest,
+} from './hooks/useTouchHitTest';
 // Store.
 export {
   createViewerStore,

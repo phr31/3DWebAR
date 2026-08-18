@@ -184,20 +184,22 @@ packages/webar-frame-viewer/src/
 │   ├── store.ts                estado reativo (useSyncExternalStore, zero deps)
 │   ├── components/
 │   │   ├── ARCanvas.tsx        <Canvas> do R3F + <XR>; NoToneMapping, alpha
-│   │   ├── XRScene.tsx         caminho WebXR: hit-test, âncora, modo manual
+│   │   ├── XRScene.tsx         caminho WebXR: mira no dedo, hit-test, âncora
 │   │   ├── PassthroughScene.tsx caminho iOS: vídeo + giroscópio + gestos
 │   │   ├── FrameModel.tsx      o quadro 3D, declarativo
 │   │   ├── Reticle.tsx         contorno real do produto (âmbar → verde)
 │   │   └── Overlay.tsx         a interface, com os mesmos data-fv-*
 │   └── hooks/
 │       ├── useAR.ts            engine, ciclo de vida, fallback XR→passthrough
-│       ├── useHitTest.ts       useXRHitTest + histerese de 5 quadros
+│       ├── useTouchHitTest.ts  hit-test de transient input: o raio sai do dedo
+│       ├── useHitTest.ts       legado: useXRHitTest do centro da tela + histerese
 │       ├── usePassthrough.ts   getUserMedia + DeviceOrientation + frustum
-│       ├── usePassthroughPlacement.ts  pan / pinça / roll / tap
+│       ├── usePassthroughPlacement.ts  mira / pan / pinça / roll
 │       ├── useCapture.ts       screenshot e compartilhamento
 │       └── useArtTexture.ts    ponte para o AssetLoader (refcount, CORS)
 ├── core/                       lógica compartilhada, sem React e sem `three` estático
 │   ├── public.ts               ⭐ entry `/core` — server-safe, sem "use client"
+│   ├── xr/touchHitTest.ts      pose do quadro no ponto tocado (nunca recusa)
 │   ├── xr/hitTest.ts           filtro de parede, histerese, projeção manual
 │   ├── passthrough/            camera · orientation · frustum · ambient
 │   ├── capabilities.ts         sondas de ambiente (HTTPS, WebGL, XR, webview)
@@ -237,10 +239,11 @@ Os valores vêm de `capabilities` em cada `SceneManager`:
 | `usesDomOverlay` | ✅ | ❌ |
 | Gestos: mover / distância / girar | ❌ / ❌ / ❌ | ✅ / `allowScale` / `allowRotate` |
 | Imagem da câmera | Compositor XR (`.fv-video` fica oculto) | `<video>` com `object-fit: cover` |
-| Posicionar | Toque `select` do XR | Toque na tela |
+| Posicionar | Dedo mira, `select` (soltar) ancora | Dedo mira, soltar ancora |
+| Onde o raio nasce | No ponto tocado (*transient input*) | No ponto tocado (desprojeção) |
 | Combate a *drift* | XR anchors | Base congelada ao fixar |
 | Luz ambiente | `light-estimation` do XR | Amostragem 8×8 do vídeo, 1 Hz |
-| Posicionamento manual | ✅ (`enableManualPlacement`) | — (o arrasto já resolve) |
+| Sem superfície detectada | Posiciona assim mesmo, na distância assumida (contorno âmbar) | Sempre distância assumida |
 | Campo de visão | Lido da sessão XR | `assumedCameraFovH` (padrão 68°) |
 
 **Por que WebXR não tira foto:** dentro de uma `XRSession` o render vai para o
@@ -263,8 +266,14 @@ Não há o que capturar. Por isso `canCapture` é `false` e o CSS esconde `.fv-s
   não é aceitável — toda falha vira evento `error`, callback `onError` e
   `status: 'error'`.
 - **O retículo é o contorno real do produto**, não um anel genérico: o usuário vê na
-  hora se 50 × 70 cabe entre a porta e a estante. Ele fica âmbar enquanto instável e
-  verde quando o alvo estabiliza (5 quadros consecutivos válidos).
+  hora se 50 × 70 cabe entre a porta e a estante. Verde quando há superfície de parede
+  detectada sob o dedo, âmbar quando a profundidade é estimada.
+- **Quem escolhe o lugar do quadro é o toque, nunca a detecção.** No WebXR o hit-test
+  usa *transient input* (`requestHitTestSourceForTransientInput`), então o raio sai do
+  ponto tocado e não do centro da tela. A detecção só **qualifica** esse ponto: sem
+  superfície reconhecida o quadro é posicionado do mesmo jeito, na distância assumida.
+  Antes o caminho era o inverso — a ferramenta escolhia o ponto e, em parede branca e
+  lisa (que é a regra, não a exceção), não escolhia nenhum.
 
 ---
 
@@ -553,7 +562,7 @@ Na API React não existe `container`: o `<FrameViewer>` é o próprio elemento.
 |---|---|---|---|
 | `allowRotate` | `boolean` | `true` | Gesto de girar (só passthrough) |
 | `allowScale` | `boolean` | `true` | Gesto de pinçar para ajustar a distância (só passthrough) |
-| `autoPlaceOnPlane` | `boolean` | `true` | O quadro segue o plano detectado até o usuário tocar para fixar |
+| `autoPlaceOnPlane` | `boolean` | `false` | Legado: o quadro segue sozinho o plano detectado antes do toque. **Ignorado no caminho WebXR**, onde o lugar é sempre escolhido pelo toque |
 | `autoStart` | `boolean` | `false` | Inicia câmera/sessão sem esperar o toque — **veja a nota abaixo** |
 | `engine` | `'webxr' \| 'passthrough'` | auto | Força um engine. Útil para QA |
 | `frame` | `FrameStyle` | ver tabela | Estilo da moldura renderizada em 3D |
@@ -640,10 +649,9 @@ Exceções lançadas dentro de um *handler* são capturadas e registradas no con
 stateDiagram-v2
     [*] --> idle
     idle --> loading: start()
-    loading --> placing: autoPlaceOnPlane
-    loading --> ready: autoPlaceOnPlane = false
+    loading --> placing: câmera no ar, esperando o toque
     ready --> placing
-    placing --> placed: place() — toque na tela
+    placing --> placed: soltar o dedo — ancora no ponto tocado
     placed --> placing: reset() — botão "Reposicionar"
     placing --> paused: pause()
     placed --> paused: pause()
@@ -658,8 +666,8 @@ stateDiagram-v2
 
 ### `ARHint`
 
-`'scan'` · `'move-slower'` · `'aim-wall'` · `'tap-to-place'` · `'no-wall-found'` ·
-`'drag-to-move'` · `'placed'` — o texto de cada uma está em
+`'scan'` · `'move-slower'` · `'aim-wall'` · `'tap-to-place'` · `'hold-to-aim'` ·
+`'no-wall-found'` · `'drag-to-move'` · `'placed'` — o texto de cada uma está em
 [Textos e idiomas](#textos-e-idiomas).
 
 ### `PlacementInfo`
@@ -667,7 +675,10 @@ stateDiagram-v2
 ```ts
 interface PlacementInfo {
   distanceMeters: number;                        // câmera → quadro
-  source: 'hit-test' | 'manual' | 'auto';        // como o ponto foi obtido
+  // 'hit-test' = havia parede detectada sob o dedo, profundidade medida.
+  // 'manual'   = distância assumida (`assumedWallDistanceM`).
+  source: 'hit-test' | 'manual' | 'auto';
+
   position: { x: number; y: number; z: number }; // em metros
 }
 ```
@@ -850,15 +861,18 @@ O JavaScript só troca atributos; o CSS faz o resto. Use-os para condicionar seu
 
 ### Fluxo de posicionamento
 
-O toque **ancora** o quadro; ele não trava. Entre ancorar e travar existe uma janela de
-ajuste fino em que arrastar o dedo move a peça — nos dois engines. O cadeado 🔒 é o que
-congela de vez, e é também a única forma de destravar. Um toque na tela nunca solta um
-quadro já ancorado.
+Nada é posicionado automaticamente: ao abrir a câmera a cena fica vazia até o usuário
+encostar o dedo onde quer o quadro. Enquanto o dedo está na tela a peça aparece
+translúcida naquele ponto; soltar **ancora**, mas não trava. Entre ancorar e travar
+existe uma janela de ajuste fino em que arrastar o dedo move a peça — nos dois engines. O
+cadeado 🔒 é o que congela de vez, e é também a única forma de destravar. Um toque na
+tela nunca solta um quadro já ancorado.
 
 | Passo | `data-fv-state` | `data-fv-lock` | Dica | Gestos |
 |---|---|---|---|---|
-| Apontar para a parede | `placing` | `0` | `hint.scan` | — |
-| Tocar para posicionar | `placing` | `0` | `hint.tap-to-place` | toque ancora |
+| Escolher o lugar | `placing` | `0` | `hint.tap-to-place` | tela limpa, esperando o dedo |
+| Mirar | `placing` | `0` | `hint.hold-to-aim` | dedo na tela: o quadro segue o ponto tocado |
+| Posicionar | `placing` → `placed` | `0` | — | soltar o dedo ancora |
 | Ajustar | `placed` | `0` | `hint.adjust` | arrastar move |
 | Travado | `placed` | `1` | `hint.placed` | nenhum |
 
@@ -932,7 +946,8 @@ sobrescrita por `options.strings`:
 | `hint.scan` | Aponte a câmera para a parede | Point the camera at the wall |
 | `hint.move-slower` | Mova o celular lentamente de um lado para o outro | Move the phone slowly from side to side |
 | `hint.aim-wall` | Isso parece o chão — aponte para a parede | That looks like the floor — aim at the wall |
-| `hint.tap-to-place` | Toque na parede para posicionar | Tap the wall to place |
+| `hint.tap-to-place` | Toque na parede onde quer o quadro | Tap the wall where you want the frame |
+| `hint.hold-to-aim` | Solte para fixar · verde = superfície detectada | Release to place · green = surface detected |
 | `hint.no-wall-found` | Não encontramos a parede. Tente apontar perto de um canto, um interruptor ou o batente da porta. | We could not find the wall. Try aiming near a corner, a light switch or a door frame. |
 | `hint.drag-to-move` | Arraste para mover · pince para ajustar a distância | Drag to move · pinch to adjust the distance |
 | `hint.no-yaw` | Seu aparelho não rastreia giros na horizontal. Mantenha o celular parado, arraste o quadro e toque para fixar. | Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it. |
@@ -1126,13 +1141,13 @@ Instagram/Facebook o `getUserMedia` é bloqueado pela plataforma.
 | Imagem não carrega / tela sem arte | CDN sem `Access-Control-Allow-Origin` | Configure o CORS. A lib detecta o caso e escreve a explicação no console |
 | `SECURITY_ERR` ao tirar foto | Marca d'água desenhada de um `<img>` sem `crossOrigin` | Adicione `crossOrigin="anonymous"` na imagem da marca d'água |
 | Quadro pequeno ou grande demais no iPhone | O FOV assumido não bate com a lente do aparelho | Meça com fita métrica e calibre `options.assumedCameraFovH` (padrão 68°) |
-| Aparece "Posicionar manualmente" | Parede branca e lisa não gera plano no ARCore | É o caminho previsto: aceite o manual, ou aponte perto de um canto/interruptor/batente |
+| Contorno fica âmbar e nunca verde | Parede branca e lisa não gera plano no ARCore | O quadro é posicionado assim mesmo, na distância assumida. Para profundidade medida, toque perto de um canto/interruptor/batente |
 | Nada acontece no webview do Instagram/Facebook | A plataforma bloqueia `getUserMedia` | Nada a fazer no código; o overlay já pede para abrir no navegador |
 | Botão de foto não aparece no Android | Engine WebXR: `canCapture` é `false` | Comportamento esperado — o framebuffer XR não contém a câmera |
 | "Too many active WebGL contexts" no iOS | Falta chamar `destroy()` ao fechar | Sempre chame `destroy()`; o componente React já faz isso |
 | `Nenhum loader do three registrado` | O entry UMD ou o CDN não foi alcançado, ou você importou de um caminho não previsto | Chame `provideThree()` antes de `start()` |
 | Sessão XR não abre e volta para `idle` | `SecurityError` por falta de ativação do usuário | Não use `autoStart: true`; deixe o usuário tocar no botão |
-| Quadro "tremendo" ao procurar a parede | Poucos quadros estáveis ainda | Mova o celular lentamente de lado; a lib exige 5 quadros válidos consecutivos |
+| Nada aparece ao abrir a câmera | Comportamento esperado | O quadro só surge quando o dedo encosta na tela — é o usuário quem escolhe o ponto |
 | Aviso `textura NxN acima do recomendado` | Imagem maior que 2048 px | Sirva a arte em até ~1024 px |
 
 ---
@@ -1142,7 +1157,7 @@ Instagram/Facebook o `getUserMedia` é bloqueado pela plataforma.
 | Limitação | Impacto |
 |---|---|
 | Webview do Instagram/Facebook bloqueia `getUserMedia` | Detectado; o overlay pede para abrir no navegador |
-| ARCore não detecta parede branca e lisa | Após 6 s aparece "Posicionar manualmente", que mantém tracking 6-DoF |
+| ARCore não detecta parede branca e lisa | O toque posiciona na distância assumida (`assumedWallDistanceM`), com contorno âmbar; o tracking 6-DoF continua valendo |
 | Captura de tela indisponível no WebXR | O framebuffer XR não contém a câmera; o botão de foto não aparece no Android |
 | FOV real da câmera não é legível por API | O passthrough assume 68°, calibrável via `options.assumedCameraFovH` |
 | iOS sem paralaxe | Giroscópio 3-DoF com deriva; há botão de recentralizar |

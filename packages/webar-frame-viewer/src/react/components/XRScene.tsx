@@ -8,19 +8,20 @@ import type { LoadedTexture } from '../../core/AssetLoader';
 import { GestureController } from '../../core/GestureController';
 import { worldPerPixel } from '../../core/TransformUtils';
 import type { FrameStyle, ProductData, ResolvedOptions } from '../../core/types';
-import { ambientFromLightEstimate, manualCandidate } from '../../core/xr/hitTest';
+import { ambientFromLightEstimate } from '../../core/xr/hitTest';
 import type { ARApi } from '../hooks/useAR';
-import { useHitTest } from '../hooks/useHitTest';
+import { useTouchHitTest } from '../hooks/useTouchHitTest';
 import { type FrameMetrics, FrameModel } from './FrameModel';
 import { Reticle } from './Reticle';
 
 /**
- * Cena do caminho WebXR (Android/ARCore): hit-test em parede, âncora e
- * posicionamento manual como plano B.
+ * Cena do caminho WebXR (Android/ARCore): o usuário toca onde quer o quadro, o
+ * hit-test qualifica aquele ponto e o toque ancora.
  *
- * Roda dentro de `<XR>`. Toda a decisão de aceite mora em `core/xr/hitTest`,
- * compartilhada com o `WebXRSceneManager` do build UMD — aqui só há a ligação
- * com o loop do R3F e com o estado do React.
+ * Roda dentro de `<XR>`. Nada é posicionado sozinho: enquanto não há dedo na
+ * tela a cena fica vazia. A resolução da pose sob o dedo mora em
+ * `core/xr/touchHitTest`; aqui só há a ligação com o loop do R3F e com o estado
+ * do React.
  */
 
 // `light-estimation` ainda não está em @types/webxr. Só o mínimo que usamos.
@@ -91,10 +92,16 @@ export function XRScene({
    * fim, e escrever na base seria perder a correção de drift.
    */
   const dragOffsetRef = useRef(new THREE.Vector3());
+  /**
+   * O espaço em que o three renderiza, guardado no loop. O handler de `select`
+   * roda fora do `useFrame` e precisa dele para ler o raio do toque.
+   */
+  const referenceSpaceRef = useRef<XRReferenceSpace | null>(null);
 
   const [metrics, setMetrics] = useState<FrameMetrics | null>(null);
   const [ambient, setAmbient] = useState(1);
-  const [stable, setStable] = useState(false);
+  /** Superfície de parede realmente detectada sob o dedo — pinta o contorno de verde. */
+  const [onSurface, setOnSurface] = useState(false);
   // Par ref+state: a ref é lida no `useFrame`, o state é o que a interface vê.
   // Só com o state a opacidade sai de 0.85 e o cadeado aparece.
   const [placed, setPlaced] = useState(false);
@@ -102,12 +109,10 @@ export function XRScene({
 
   const [anchor, createAnchor] = useXRAnchor();
 
-  const hitTest = useHitTest({
+  const touch = useTouchHitTest({
+    assumedWallDistanceM: options.assumedWallDistanceM,
     wallToleranceDeg: options.wallToleranceDeg,
-    noHitTimeoutMs: options.noHitTimeoutMs,
     enabled: !placed,
-    manualMode: api.manualModeRef.current,
-    onHint: api.setHint,
   });
 
   // A sessão XR está no ar: só agora o overlay pode sair de 'loading'.
@@ -142,48 +147,46 @@ export function XRScene({
 
   const place = useCallback(() => {
     const group = groupRef.current;
-    if (!group || !hitTest.hasCandidateRef.current) return;
+    if (!group || !touch.activeRef.current) return;
 
     placedRef.current = true;
     setPlaced(true);
     // Ancorar não trava: o cadeado começa aberto para o ajuste fino.
     setLocked(false);
     dragOffsetRef.current.set(0, 0, 0);
-    basePositionRef.current.copy(hitTest.tracker.position);
-    baseQuaternionRef.current.copy(hitTest.tracker.quaternion);
+    basePositionRef.current.copy(touch.position);
+    baseQuaternionRef.current.copy(touch.quaternion);
 
     // Anchors reduzem materialmente o drift depois de 30 s parado — e o usuário
     // fica bastante tempo olhando para o quadro. Falha é aceitável: a feature
     // pode não ter sido concedida.
     void createAnchor({
       relativeTo: 'world',
-      worldPosition: hitTest.tracker.position.clone(),
-      worldQuaternion: hitTest.tracker.quaternion.clone(),
+      worldPosition: touch.position.clone(),
+      worldQuaternion: touch.quaternion.clone(),
     }).catch(() => undefined);
 
     const cameraPosition = new THREE.Vector3();
     camera.getWorldPosition(cameraPosition);
 
     api.reportPlaced({
-      distanceMeters: hitTest.tracker.distanceTo(cameraPosition),
-      source: api.manualModeRef.current ? 'manual' : 'hit-test',
-      position: {
-        x: hitTest.tracker.position.x,
-        y: hitTest.tracker.position.y,
-        z: hitTest.tracker.position.z,
-      },
+      distanceMeters: touch.position.distanceTo(cameraPosition),
+      // A profundidade só é medida quando havia superfície de parede sob o dedo;
+      // caso contrário foi a distância assumida, que é o mesmo que 'manual'.
+      source: touch.qualityRef.current === 'plane' ? 'hit-test' : 'manual',
+      position: { x: touch.position.x, y: touch.position.y, z: touch.position.z },
     });
-  }, [api, camera, createAnchor, hitTest]);
+  }, [api, camera, createAnchor, touch]);
 
   const reset = useCallback(() => {
     placedRef.current = false;
     setPlaced(false);
     setLocked(false);
-    setStable(false);
+    setOnSurface(false);
     dragOffsetRef.current.set(0, 0, 0);
-    hitTest.restart();
+    touch.restart();
     api.reportUnplaced();
-  }, [api, hitTest]);
+  }, [api, touch]);
 
   /**
    * Travar recria a âncora onde o quadro realmente está. Sem isso, a correção de
@@ -209,19 +212,38 @@ export function XRScene({
     [api, createAnchor],
   );
 
-  // Toque na tela: SÓ ancora. Depois de ancorado o toque não faz mais nada —
-  // antes, um toque acidental devolvia o quadro a seguir a câmera, que é
-  // exatamente a sensação de "o quadro não trava". Ajustar é arrastando,
-  // congelar é no cadeado.
+  /**
+   * O dedo encostado mira; soltar ancora.
+   *
+   * `selectstart` reinicia a suavização — sem isso o quadro escorregaria desde o
+   * ponto do toque anterior até o novo. Depois de ancorado o toque não faz mais
+   * nada: antes, um toque acidental devolvia o quadro a seguir a câmera, que é
+   * exatamente a sensação de "o quadro não trava". Ajustar é arrastando,
+   * congelar é no cadeado.
+   */
   useEffect(() => {
     if (!session) return;
-    const onSelect = (): void => {
+    const onSelectStart = (): void => {
       if (placedRef.current) return;
-      if (hitTest.hasCandidateRef.current) place();
+      touch.begin();
+      api.setHint('hold-to-aim');
     };
+    const onSelect = (event: XRInputSourceEvent): void => {
+      if (placedRef.current) return;
+      const referenceSpace = referenceSpaceRef.current;
+      if (!touch.activeRef.current && referenceSpace) {
+        touch.resolveFromEvent(event, referenceSpace);
+      }
+      if (touch.activeRef.current) place();
+      else api.setHint('tap-to-place');
+    };
+    session.addEventListener('selectstart', onSelectStart);
     session.addEventListener('select', onSelect);
-    return () => session.removeEventListener('select', onSelect);
-  }, [session, place, hitTest]);
+    return () => {
+      session.removeEventListener('selectstart', onSelectStart);
+      session.removeEventListener('select', onSelect);
+    };
+  }, [session, place, touch, api]);
 
   useEffect(() => {
     api.registerReposition(reset);
@@ -300,14 +322,16 @@ export function XRScene({
       }
     }
 
+    const referenceSpace = (
+      _state.gl.xr as THREE.WebXRManager & {
+        getReferenceSpace(): XRReferenceSpace | null;
+      }
+    ).getReferenceSpace();
+    referenceSpaceRef.current = referenceSpace;
+
     // --- já ancorado: a âncora manda, o ajuste fino soma -------------------
     if (placedRef.current) {
       if (anchor && xrFrame) {
-        const referenceSpace = (
-          _state.gl.xr as THREE.WebXRManager & {
-            getReferenceSpace(): XRReferenceSpace | null;
-          }
-        ).getReferenceSpace();
         const pose = referenceSpace ? xrFrame.getPose(anchor.anchorSpace, referenceSpace) : null;
         if (pose) {
           const { position, orientation } = pose.transform;
@@ -320,49 +344,29 @@ export function XRScene({
       // existe. Ao travar o offset é absorvido pela base e zerado.
       group.position.copy(basePositionRef.current).add(dragOffsetRef.current);
       group.quaternion.copy(baseQuaternionRef.current);
-      return;
-    }
-
-    // --- posicionamento manual (parede lisa) ------------------------------
-    if (api.manualModeRef.current) {
-      manualCandidate(
-        THREE,
-        camera,
-        options.assumedWallDistanceM,
-        hitTest.tracker.position,
-        hitTest.tracker.quaternion,
-      );
-      hitTest.hasCandidateRef.current = true;
       group.visible = true;
-      group.position.copy(hitTest.tracker.position);
-      group.quaternion.copy(hitTest.tracker.quaternion);
+      // O contorno era o feedback da mira; fixado o quadro, ele só polui.
       if (reticleRef.current) reticleRef.current.visible = false;
       return;
     }
 
-    // --- hit-test ---------------------------------------------------------
-    const outcome = hitTest.outcomeRef.current;
-    const isStable = outcome.kind === 'stable';
-    if (isStable !== stable) setStable(isStable);
+    // --- mira: só existe enquanto o dedo está na tela ----------------------
+    if (xrFrame && referenceSpace) touch.update(xrFrame, referenceSpace);
 
-    if (!isStable) {
-      if (outcome.kind === 'lost') {
-        if (reticleRef.current) reticleRef.current.visible = false;
-        if (!options.autoPlaceOnPlane) group.visible = false;
-      }
-      return;
+    const active = touch.activeRef.current;
+    group.visible = active;
+    if (reticleRef.current) reticleRef.current.visible = active;
+    if (!active) return;
+
+    group.position.copy(touch.position);
+    group.quaternion.copy(touch.quaternion);
+    if (reticleRef.current) {
+      reticleRef.current.position.copy(touch.position);
+      reticleRef.current.quaternion.copy(touch.quaternion);
     }
 
-    if (options.autoPlaceOnPlane) {
-      if (reticleRef.current) reticleRef.current.visible = false;
-      group.visible = true;
-      group.position.copy(hitTest.tracker.position);
-      group.quaternion.copy(hitTest.tracker.quaternion);
-    } else if (reticleRef.current) {
-      reticleRef.current.visible = true;
-      reticleRef.current.position.copy(hitTest.tracker.position);
-      reticleRef.current.quaternion.copy(hitTest.tracker.quaternion);
-    }
+    const detected = touch.qualityRef.current === 'plane';
+    if (detected !== onSurface) setOnSurface(detected);
   });
 
   return (
@@ -373,17 +377,17 @@ export function XRScene({
         art={art}
         style={style}
         ambient={ambient}
-        // 0.85 enquanto segue o plano deixa claro que ainda não está fixado.
-        opacity={placed || !options.autoPlaceOnPlane ? 1 : 0.85}
+        // 0.85 sob o dedo deixa claro que ainda não está fixado.
+        opacity={placed ? 1 : 0.85}
         visible={false}
         onMetrics={setMetrics}
       />
-      {metrics && !options.autoPlaceOnPlane && (
+      {metrics && (
         <Reticle
           ref={reticleRef}
           width={metrics.outer.w}
           height={metrics.outer.h}
-          stable={stable}
+          stable={onSurface}
           visible={false}
         />
       )}

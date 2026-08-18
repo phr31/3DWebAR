@@ -4,6 +4,13 @@ export interface GestureHandlers {
   onPinch?: (factor: number) => void;
   onRotate?: (deltaRad: number) => void;
   onTap?: (x: number, y: number) => void;
+  /**
+   * Ponto ABSOLUTO do dedo, para posicionar onde o usuário está tocando. É o
+   * complemento do `onPan`, que entrega delta e serve ao ajuste fino. Só emitido
+   * com um único ponteiro na tela — com dois o gesto é pinça/rotação, e mirar no
+   * meio disso seria ruído.
+   */
+  onAim?: (x: number, y: number, phase: 'start' | 'move' | 'end') => void;
 }
 
 interface Pointer {
@@ -68,6 +75,7 @@ export class GestureController {
       this.downAt = performance.now();
       this.downPos = { x: ev.clientX, y: ev.clientY };
       this.moved = 0;
+      this.handlers.onAim?.(ev.clientX, ev.clientY, 'start');
     }
 
     const pair = this.pair();
@@ -87,6 +95,7 @@ export class GestureController {
     this.moved += Math.hypot(dx, dy);
 
     if (this.pointers.size === 1) {
+      this.handlers.onAim?.(ev.clientX, ev.clientY, 'move');
       if (this.enabled.move) this.handlers.onPan?.(dx, dy);
       return;
     }
@@ -114,6 +123,8 @@ export class GestureController {
     if (!this.pointers.has(ev.pointerId)) return;
     this.pointers.delete(ev.pointerId);
     this.element.releasePointerCapture?.(ev.pointerId);
+
+    if (this.pointers.size === 0) this.handlers.onAim?.(ev.clientX, ev.clientY, 'end');
 
     const isTap =
       this.pointers.size === 0 &&

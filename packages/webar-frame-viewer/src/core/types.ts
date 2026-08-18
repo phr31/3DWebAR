@@ -55,6 +55,8 @@ export type ARHint =
   | 'move-slower'
   | 'aim-wall'
   | 'tap-to-place'
+  // Dedo na tela mirando: o quadro já aparece no ponto tocado, falta soltar.
+  | 'hold-to-aim'
   | 'no-wall-found'
   | 'drag-to-move'
   | 'no-yaw'
@@ -71,7 +73,11 @@ export interface PlacementInfo {
 export interface ViewerOptions {
   allowRotate?: boolean;
   allowScale?: boolean;
-  /** Segue o plano detectado até o usuário tocar para fixar. Padrão true. */
+  /**
+   * Legado: faz o quadro seguir sozinho o plano detectado, antes do toque.
+   * Padrão false — o fluxo atual é o usuário tocar onde quer o quadro. Ignorado
+   * no caminho WebXR.
+   */
   autoPlaceOnPlane?: boolean;
   /** Inicia câmera/sessão sem esperar o toque do usuário. Padrão false — ver README. */
   autoStart?: boolean;

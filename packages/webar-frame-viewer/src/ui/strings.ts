@@ -18,6 +18,7 @@ export type StringKey =
   | 'hint.move-slower'
   | 'hint.aim-wall'
   | 'hint.tap-to-place'
+  | 'hint.hold-to-aim'
   | 'hint.no-wall-found'
   | 'hint.drag-to-move'
   | 'hint.no-yaw'
@@ -42,7 +43,10 @@ const PT: Record<StringKey, string> = {
   // A paralaxe é o que constrói o plano; usuário parado nunca detecta nada.
   'hint.move-slower': 'Mova o celular lentamente de um lado para o outro',
   'hint.aim-wall': 'Isso parece o chão — aponte para a parede',
-  'hint.tap-to-place': 'Toque na parede para posicionar',
+  'hint.tap-to-place': 'Toque na parede onde quer o quadro',
+  // Dedo na tela: o quadro já está sendo mostrado no ponto tocado. A cor do
+  // contorno é o que diz se a profundidade foi medida ou assumida.
+  'hint.hold-to-aim': 'Solte para fixar · verde = superfície detectada',
   // O ARCore agarra em bordas quase instantaneamente. Uma linha de texto que
   // melhora a taxa de sucesso mais do que qualquer código.
   'hint.no-wall-found':
@@ -75,7 +79,8 @@ const EN: Record<StringKey, string> = {
   'hint.scan': 'Point the camera at the wall',
   'hint.move-slower': 'Move the phone slowly from side to side',
   'hint.aim-wall': 'That looks like the floor — aim at the wall',
-  'hint.tap-to-place': 'Tap the wall to place',
+  'hint.tap-to-place': 'Tap the wall where you want the frame',
+  'hint.hold-to-aim': 'Release to place · green = surface detected',
   'hint.no-wall-found':
     'We could not find the wall. Try aiming near a corner, a light switch or a door frame.',
   'hint.drag-to-move': 'Drag to move · pinch to adjust the distance',

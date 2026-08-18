@@ -113,8 +113,8 @@ export function PassthroughScene({
       api.setHint('no-yaw');
       return;
     }
-    api.setHint(options.autoPlaceOnPlane ? 'drag-to-move' : 'tap-to-place');
-  }, [api, options.autoPlaceOnPlane, placed, locked, yaw]);
+    api.setHint('tap-to-place');
+  }, [api, placed, locked, yaw]);
 
   useFrame((_state, _delta) => {
     const group = groupRef.current;
@@ -156,7 +156,10 @@ export function PassthroughScene({
       art={art}
       style={style}
       ambient={ambient}
-      opacity={placed || !options.autoPlaceOnPlane ? 1 : 0.85}
+      // 0.85 sob o dedo deixa claro que ainda não está fixado. A visibilidade em
+      // si é do `placement.apply`, que sabe se já houve toque.
+      opacity={placed ? 1 : 0.85}
+      visible={false}
     />
   );
 }

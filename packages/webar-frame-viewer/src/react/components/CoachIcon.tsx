@@ -38,8 +38,10 @@ function path(hint: ARHint): React.ReactNode {
           <path d="M12 9.5v5M9.5 12h5" />
         </>
       );
-    // Tocar: mão com um pulso de toque saindo do dedo.
+    // Tocar: mão com um pulso de toque saindo do dedo. Mirar com o dedo na tela
+    // é o mesmo gesto em andamento, então repete o ícone.
     case 'tap-to-place':
+    case 'hold-to-aim':
       return (
         <>
           <path d="M9 11V6.5a1.75 1.75 0 0 1 3.5 0V13" />

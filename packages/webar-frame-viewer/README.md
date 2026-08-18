@@ -85,7 +85,7 @@ passthrough — sem paralaxe ao andar. Isso é o estado da plataforma, não um d
 | Opção | Padrão | Descrição |
 |---|---|---|
 | `autoStart` | `false` | `requestSession('immersive-ar')` exige gesto do usuário; mantenha `false` |
-| `autoPlaceOnPlane` | `true` | Segue o plano detectado até o toque fixar |
+| `autoPlaceOnPlane` | `false` | Legado: faz o quadro seguir o plano detectado antes do toque. Ignorado no WebXR |
 | `allowRotate` / `allowScale` | `true` | Gestos (só no engine de passthrough) |
 | `engine` | auto | Força `'webxr'` ou `'passthrough'`. Útil para QA |
 | `frame` | ver abaixo | `fit`, `frameWidthCm`, `frameColor`, `matCm`, `matColor`, `shadow` |

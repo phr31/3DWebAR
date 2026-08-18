@@ -248,10 +248,13 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
 
   const reportEngineReady = useCallback(
     (kind: SceneKind, canCapture: boolean) => {
+      // Câmera no ar e nada posicionado: o fluxo começa esperando o toque do
+      // usuário, sempre — não há mais um modo em que a cena se posiciona sozinha.
       store.set({
         engine: kind,
         canCapture,
-        status: latest.current.options.autoPlaceOnPlane ? 'placing' : 'ready',
+        status: 'placing',
+        hint: 'tap-to-place',
         error: null,
         panel: null,
       });
@@ -271,7 +274,7 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
   );
 
   const reportUnplaced = useCallback(() => {
-    store.set({ status: 'placing', hint: 'scan', locked: false });
+    store.set({ status: 'placing', hint: 'tap-to-place', locked: false });
   }, [store]);
 
   const registerReposition = useCallback((handler: (() => void) | null) => {

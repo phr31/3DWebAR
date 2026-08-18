@@ -4,7 +4,10 @@ export function resolveOptions(options: ViewerOptions = {}): ResolvedOptions {
   return {
     allowRotate: options.allowRotate ?? true,
     allowScale: options.allowScale ?? true,
-    autoPlaceOnPlane: options.autoPlaceOnPlane ?? true,
+    // Padrão false: quem escolhe o lugar do quadro é o toque do usuário. Deixar
+    // a peça seguir o plano sozinha só passava a impressão de que a ferramenta
+    // decide — e ela errava, porque parede lisa não vira plano.
+    autoPlaceOnPlane: options.autoPlaceOnPlane ?? false,
     // Padrão false de propósito: `requestSession('immersive-ar')` EXIGE user
     // activation, e o gate de toque também neutraliza o double-mount do StrictMode.
     autoStart: options.autoStart ?? false,
