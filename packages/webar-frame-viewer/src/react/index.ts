@@ -21,11 +21,13 @@ export { Overlay, type OverlayProps } from './components/Overlay';
 export { PassthroughScene, type PassthroughSceneProps } from './components/PassthroughScene';
 export { Reticle, type ReticleProps } from './components/Reticle';
 export { XRScene, type XRSceneProps } from './components/XRScene';
+export { XRSessionGate, type XRSessionGateProps } from './components/XRSessionGate';
 export { FrameViewer, type FrameViewerProps } from './FrameViewer';
 // Hooks.
 export { type ARApi, hintText, type UseAROptions, useAR } from './hooks/useAR';
 export { type ArtTextureResult, useArtTexture } from './hooks/useArtTexture';
 export { type CaptureOptions, type CaptureResult, useCapture } from './hooks/useCapture';
+export { type FrameStats, useFrameStats } from './hooks/useFrameStats';
 export { type HitTestOptions, type HitTestResult, useHitTest } from './hooks/useHitTest';
 export { useCoachHint, useIdleChrome } from './hooks/useOverlayVisibility';
 export {
@@ -52,6 +54,7 @@ export {
   type PanelMode,
   type PanelState,
   type ToastState,
+  useViewerSelector,
   useViewerState,
   useViewerStore,
   type ViewerState,

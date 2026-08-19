@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CapabilityReport, detectCapabilities } from '../../core/capabilities';
 import { ARError, normalizeError, userMessage } from '../../core/errors';
+import type { RelativeFramePose } from '../../core/TransformUtils';
 import type { ARHint, PlacementInfo, ResolvedOptions, SceneKind } from '../../core/types';
 import type { StringKey } from '../../ui/strings';
 import { type DebugInfo, useViewerStore } from '../store';
@@ -37,6 +38,15 @@ export interface ARApi {
   /** Guarda o `enterAR` da store XR, para o botão "Tentar novamente" reusá-lo. */
   setEnterXR(enterXR: () => Promise<unknown>): void;
   close(): void;
+  /**
+   * A sessão XR terminou por fora (back do Android, botão do sistema). Volta ao
+   * idle sem fechar o viewer — não confundir com `close`, que é o ✕.
+   */
+  reportSessionEnded(): void;
+  /** Guarda a pose do quadro para a próxima entrada no AR. `null` limpa. */
+  retainPose(pose: RelativeFramePose | null): void;
+  /** Lê e consome a pose guardada. */
+  takeRetainedPose(): RelativeFramePose | null;
   setHint(hint: ARHint | null): void;
   reportPlaced(info: PlacementInfo): void;
   reportUnplaced(): void;
@@ -76,6 +86,19 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
   const lockRef = useRef<((locked: boolean) => void) | null>(null);
   const toastSeqRef = useRef(0);
   const startingRef = useRef(false);
+  /**
+   * Pose do quadro guardada quando a sessão XR morreu, para a próxima entrada.
+   *
+   * Uma ref, e não campo do store: toda escrita no store notifica listeners e
+   * re-renderiza o overlay por um dado que ninguém pinta. E aqui, e não em escopo
+   * de módulo, porque o store é por instância justamente para dois viewers na
+   * mesma página não misturarem estado — um módulo global restauraria a pose do
+   * quadro A sobre o quadro B.
+   *
+   * Vive enquanto o `<FrameViewer>` estiver montado: recarregar a página, ou
+   * fechar no ✕ (que o integrador costuma tratar desmontando), começa limpo.
+   */
+  const retainedPoseRef = useRef<RelativeFramePose | null>(null);
   // Declarados aqui porque `fail` (definido antes de `start`) precisa reiniciar.
   const startRef = useRef<((enterXR: () => Promise<unknown>) => Promise<void>) | null>(null);
   const enterXRRef = useRef<() => Promise<unknown>>(() => Promise.resolve());
@@ -208,6 +231,31 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
     latest.current.onClose?.();
   }, [store]);
 
+  /**
+   * A XRSession acabou: back do Android, botão do sistema, ou o runtime desistiu.
+   *
+   * Volta para 'idle' e NÃO fecha o viewer. O botão "Ver na minha parede"
+   * reaparece (o CSS só o mostra nesse estado) e `start()` reentra sem problema:
+   * as capacidades já estão em cache, então `enterXR()` continua sendo chamado
+   * dentro do clique, com a user activation intacta.
+   *
+   * O `ARController` do build UMD tratava `sessionend` emitindo `close` +
+   * destroy, mas lá não havia volta. Aqui `onClose` continua significando "o
+   * usuário fechou o overlay" e só sai do ✕ — o integrador costuma desmontar o
+   * `<FrameViewer>` nesse callback, o que apagaria a pose retida entre sessões.
+   *
+   * `engine` NÃO é tocado de propósito: o `<XR>` só é renderizado enquanto ele
+   * vale 'webxr', e desmontá-lo deixaria `xrStore.enterAR()` sem nada em que agir
+   * na segunda tentativa.
+   */
+  const reportSessionEnded = useCallback(() => {
+    const current = store.get();
+    // 'error' tem um painel com "Tentar novamente" na tela, e sobrescrevê-lo
+    // tiraria a única saída. 'destroyed' é o ✕, que já ganhou.
+    if (current.status === 'error' || current.status === 'destroyed') return;
+    store.set({ status: 'idle', hint: null, panel: null, locked: false, toast: null });
+  }, [store]);
+
   const setHint = useCallback(
     (hint: ARHint | null) => {
       const current = store.get();
@@ -263,19 +311,42 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
     [store],
   );
 
+  const showToast = useCallback(
+    (text: string) => {
+      toastSeqRef.current += 1;
+      store.set({ toast: { id: toastSeqRef.current, text } });
+    },
+    [store],
+  );
+
   const reportPlaced = useCallback(
     (info: PlacementInfo) => {
       // Ancorado, ainda destravado: é a janela de ajuste fino. Travar é um ato
       // explícito no cadeado — o toque nunca trava nem destrava sozinho.
       store.set({ status: 'placed', hint: 'adjust', locked: false });
+      // 'auto' só sai da restauração entre sessões, onde a pose é uma ESTIMATIVA
+      // relativa à câmera. O aviso é o que a torna honesta — e o estado
+      // destravado, que já é o desta transição, é o convite a corrigir.
+      if (info.source === 'auto') showToast(latest.current.t('toast.restored'));
       latest.current.onPlace?.(info);
     },
-    [store],
+    [store, showToast],
   );
 
   const reportUnplaced = useCallback(() => {
     store.set({ status: 'placing', hint: 'tap-to-place', locked: false });
   }, [store]);
+
+  const retainPose = useCallback((pose: RelativeFramePose | null) => {
+    retainedPoseRef.current = pose;
+  }, []);
+
+  /** Lê E consome: restaurar acontece no máximo uma vez por sessão. */
+  const takeRetainedPose = useCallback((): RelativeFramePose | null => {
+    const pose = retainedPoseRef.current;
+    retainedPoseRef.current = null;
+    return pose;
+  }, []);
 
   const registerReposition = useCallback((handler: (() => void) | null) => {
     repositionRef.current = handler;
@@ -290,14 +361,6 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
   const registerLock = useCallback((handler: ((locked: boolean) => void) | null) => {
     lockRef.current = handler;
   }, []);
-
-  const showToast = useCallback(
-    (text: string) => {
-      toastSeqRef.current += 1;
-      store.set({ toast: { id: toastSeqRef.current, text } });
-    },
-    [store],
-  );
 
   const setLocked = useCallback(
     (locked: boolean) => {
@@ -355,6 +418,9 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
       start,
       setEnterXR,
       close,
+      reportSessionEnded,
+      retainPose,
+      takeRetainedPose,
       setHint,
       reportPlaced,
       reportUnplaced,
@@ -376,6 +442,9 @@ export function useAR({ options, t, onReady, onPlace, onError, onClose }: UseARO
       start,
       setEnterXR,
       close,
+      reportSessionEnded,
+      retainPose,
+      takeRetainedPose,
       setHint,
       reportPlaced,
       reportUnplaced,

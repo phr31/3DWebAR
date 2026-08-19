@@ -85,9 +85,22 @@ export function createRenderer(three: ThreeNS, canvas: HTMLCanvasElement): THREE
   return renderer;
 }
 
+/**
+ * Aparelho com pouca folga para renderizar.
+ *
+ * Heurística grosseira de propósito: não existe sinal confiável de GPU no
+ * navegador, e `deviceMemory`/`hardwareConcurrency` são o que há. Serve às três
+ * decisões de qualidade do pacote — teto de pixel ratio, MSAA e escala do
+ * framebuffer XR — e é uma só para que elas não divirjam.
+ *
+ * Toca `navigator`, portanto só pode ser chamada em runtime de navegador.
+ */
+export function isLowEndDevice(): boolean {
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  return (nav.deviceMemory ?? 8) <= 3 || (navigator.hardwareConcurrency ?? 8) <= 4;
+}
+
 /** Num aparelho com dpr 3, renderizar 5 quads a 3× é desperdício puro. */
 export function pixelRatioCap(): number {
-  const nav = navigator as Navigator & { deviceMemory?: number };
-  const lowEnd = (nav.deviceMemory ?? 8) <= 3 || (navigator.hardwareConcurrency ?? 8) <= 4;
-  return lowEnd ? 1.5 : 2;
+  return isLowEndDevice() ? 1.5 : 2;
 }

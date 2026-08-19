@@ -48,6 +48,9 @@ export interface TouchHitTestResult {
 
 export function useTouchHitTest(options: TouchHitTestOptions): TouchHitTestResult {
   const session = useXR((state) => state.session);
+  // Fora da ref `latest` de propósito: aqui `enabled` precisa mesmo ser
+  // dependência de efeito, para a source ser cancelada ao ancorar.
+  const { enabled } = options;
 
   const position = useMemo(() => new THREE.Vector3(), []);
   const quaternion = useMemo(() => new THREE.Quaternion(), []);
@@ -67,13 +70,18 @@ export function useTouchHitTest(options: TouchHitTestOptions): TouchHitTestResul
   latest.current = options;
 
   /**
-   * Uma source por sessão. `'point'` entra junto de `'plane'` de propósito: numa
-   * parede branca o ARCore não promove plano nenhum, e o feature point é o único
-   * retorno possível. Dele só se aproveita a posição — ver `resolveTouchCandidate`.
+   * Uma source por sessão, enquanto ainda há o que mirar. `'point'` entra junto
+   * de `'plane'` de propósito: numa parede branca o ARCore não promove plano
+   * nenhum, e o feature point é o único retorno possível. Dele só se aproveita a
+   * posição — ver `resolveTouchCandidate`.
+   *
+   * Depois de ancorar a source é CANCELADA, e não apenas ignorada no `update`:
+   * ela custa trabalho do ARCore a cada frame, e a partir dali ninguém mais mira.
+   * O `restart()` do reposicionamento reabre `enabled` e ela é recriada.
    */
   useEffect(() => {
     const request = session?.requestHitTestSourceForTransientInput;
-    if (!(session && request)) return;
+    if (!(session && request && enabled)) return;
     let cancelled = false;
 
     // O tipo do @types/webxr admite `undefined` no retorno; um runtime que faça
@@ -100,7 +108,7 @@ export function useTouchHitTest(options: TouchHitTestOptions): TouchHitTestResul
       sourceRef.current?.cancel();
       sourceRef.current = null;
     };
-  }, [session]);
+  }, [session, enabled]);
 
   return useMemo(() => {
     /** Escreve a pose do candidato a partir do raio do toque. */

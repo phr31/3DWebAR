@@ -28,6 +28,32 @@ export interface DeviceAngles {
  */
 export type YawStatus = 'unknown' | 'ok' | 'dead';
 
+/**
+ * Escrachos da conversão de sensor. Preguiçosos porque o `three` chega por
+ * parâmetro — é o que mantém este arquivo sem `import * as THREE`. Isto roda uma
+ * vez por frame durante toda a sessão de passthrough; a versão anterior alocava
+ * um Euler, dois Quaternion e um Vector3 em cada uma delas.
+ */
+interface OrientationScratch {
+  euler: THREE.Euler;
+  /** Constante: −90° em torno de X. Montado uma vez e só lido. */
+  deviceToCamera: THREE.Quaternion;
+  screen: THREE.Quaternion;
+  screenAxis: THREE.Vector3;
+}
+let orientationScratch: OrientationScratch | null = null;
+
+function getOrientationScratch(three: ThreeNS): OrientationScratch {
+  orientationScratch ??= {
+    euler: new three.Euler(0, 0, 0, 'YXZ'),
+    // -PI/2 em torno de X: o dispositivo olha para -Z quando deitado.
+    deviceToCamera: new three.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2),
+    screen: new three.Quaternion(),
+    screenAxis: new three.Vector3(0, 0, 1),
+  };
+  return orientationScratch;
+}
+
 /** Conversão canônica de DeviceOrientationEvent para quaternion de câmera. */
 export function orientationQuaternion(
   three: ThreeNS,
@@ -37,13 +63,10 @@ export function orientationQuaternion(
   gamma: number,
   screenAngle: number,
 ): void {
-  const euler = new three.Euler(beta, alpha, -gamma, 'YXZ');
-  target.setFromEuler(euler);
-  // -PI/2 em torno de X: o dispositivo olha para -Z quando deitado.
-  target.multiply(new three.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2));
-  target.multiply(
-    new three.Quaternion().setFromAxisAngle(new three.Vector3(0, 0, 1), -screenAngle),
-  );
+  const s = getOrientationScratch(three);
+  target.setFromEuler(s.euler.set(beta, alpha, -gamma, 'YXZ'));
+  target.multiply(s.deviceToCamera);
+  target.multiply(s.screen.setFromAxisAngle(s.screenAxis, -screenAngle));
 }
 
 /** Aplica os ângulos em graus do DeviceOrientationEvent direto no quaternion. */

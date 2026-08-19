@@ -9,6 +9,7 @@ export type StringKey =
   | 'unlock'
   | 'toast.locked'
   | 'toast.unlocked'
+  | 'toast.restored'
   | 'reposition'
   | 'manual'
   | 'keepTrying'
@@ -34,6 +35,9 @@ const PT: Record<StringKey, string> = {
   unlock: 'Destravar posição',
   'toast.locked': 'Posição travada',
   'toast.unlocked': 'Posição liberada para ajuste',
+  // Restaurado de uma sessão anterior: a pose é relativa a onde o usuário está e
+  // para onde olha agora, então dizer "aproximada" é o que a torna honesta.
+  'toast.restored': 'Posição aproximada — arraste para ajustar',
   reposition: 'Reposicionar',
   manual: 'Posicionar manualmente',
   keepTrying: 'Continuar tentando',
@@ -59,7 +63,9 @@ const PT: Record<StringKey, string> = {
   // Passo 3 do fluxo: já ancorado, ainda ajustável. O emoji repete o ícone do
   // botão porque é o que liga a frase ao controle sem uma seta apontando.
   'hint.adjust': 'Arraste para ajustar · 🔒 trava',
-  'hint.placed': 'Quadro travado',
+  // O caminho de volta ao ajuste sem recomeçar do zero. Sem a segunda metade da
+  // frase, "Reposicionar" parece a única saída — e ele descarta a pose.
+  'hint.placed': 'Quadro travado · toque nele para ajustar',
 };
 
 const EN: Record<StringKey, string> = {
@@ -71,6 +77,7 @@ const EN: Record<StringKey, string> = {
   unlock: 'Unlock position',
   'toast.locked': 'Position locked',
   'toast.unlocked': 'Free to adjust',
+  'toast.restored': 'Approximate position — drag to adjust',
   reposition: 'Reposition',
   manual: 'Place manually',
   keepTrying: 'Keep trying',
@@ -87,7 +94,7 @@ const EN: Record<StringKey, string> = {
   'hint.no-yaw':
     'Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it.',
   'hint.adjust': 'Drag to adjust · 🔒 locks',
-  'hint.placed': 'Frame locked',
+  'hint.placed': 'Frame locked · tap it to adjust',
 };
 
 export function createStrings(

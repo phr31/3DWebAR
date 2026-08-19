@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useRef, useSyncExternalStore } from 'react';
 import type { ARError } from '../core/errors';
 import type { DeviceAngles, YawStatus } from '../core/passthrough/orientation';
 import type { ARHint, ARStatus, SceneKind } from '../core/types';
@@ -42,6 +42,18 @@ export interface DebugInfo {
   /** Últimos ângulos recebidos. Null no WebXR, que não usa o giroscópio. */
   angles: DeviceAngles | null;
   yaw: YawStatus;
+  /**
+   * Custo por frame, amostrado por `useFrameStats`. Opcionais porque quem monta
+   * o `DebugInfo` à mão (um integrador, um teste) não precisa deles.
+   *
+   * `frameMs` é média móvel — o número instantâneo oscila demais para ser lido
+   * na tela. `textures` é o que denuncia vazamento de GPU entre sessões: ele
+   * deve voltar ao mesmo valor depois de sair e reentrar no AR.
+   */
+  frameMs?: number;
+  calls?: number;
+  tris?: number;
+  textures?: number;
 }
 
 /**
@@ -124,13 +136,41 @@ export function useViewerStore(): ViewerStore {
 }
 
 /**
- * O estado inteiro, não um seletor: são poucos campos e um overlay pequeno,
- * então um seletor com memo custaria mais complexidade do que economiza em
- * render.
+ * O estado inteiro. Certo para o `<Overlay>`, que pinta quase todos os campos e
+ * cujo re-render é uma árvore de DOM pequena.
+ *
+ * ERRADO para quem envolve o `<Canvas>`: o layout effect do R3F não tem array de
+ * dependências, então todo render do componente que hospeda o `<Canvas>` refaz
+ * `configure()` e reconcilia a árvore 3D inteira. Ali use `useViewerSelector`.
  */
 export function useViewerState(): ViewerState {
   const store = useViewerStore();
   return useSyncExternalStore(store.subscribe, store.get, () => INITIAL_STATE);
+}
+
+/**
+ * Um campo só do estado, para não re-renderizar por mudança que não interessa.
+ *
+ * Aceita apenas valores PRIMITIVOS de propósito: `useSyncExternalStore` compara
+ * o snapshot com `Object.is` e entraria em laço infinito com um seletor que
+ * devolve objeto novo a cada leitura. A saída seria
+ * `use-sync-external-store/with-selector`, e essa dependência custa mais do que
+ * vale — o pacote declara `dependencies: {}`. Para ler vários campos, chame o
+ * hook uma vez por campo.
+ */
+export function useViewerSelector<T extends string | number | boolean | null | undefined>(
+  selector: (state: ViewerState) => T,
+): T {
+  const store = useViewerStore();
+  // O seletor costuma ser um literal inline, portanto novo a cada render; numa
+  // ref ele não invalida o `getSnapshot` e não força reinscrição.
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+
+  const getSnapshot = useCallback(() => selectorRef.current(store.get()), [store]);
+  const getServerSnapshot = useCallback(() => selectorRef.current(INITIAL_STATE), []);
+
+  return useSyncExternalStore(store.subscribe, getSnapshot, getServerSnapshot);
 }
 
 /** Estados visuais do CSS. `paused` e `destroyed` voltam a parecer `idle`. */

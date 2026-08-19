@@ -15,6 +15,14 @@ import { useEffect, useRef, useState } from 'react';
 const HINT_MS = 5000;
 /** Inatividade até a interface sair da frente da parede. */
 const IDLE_MS = 5000;
+/**
+ * Piso entre re-armadas do temporizador de ociosidade.
+ *
+ * `pointermove` chega a 60–120 Hz durante um arraste, e cada evento derrubava e
+ * recriava um `setTimeout`. Com um piso muito menor do que `IDLE_MS`, a precisão
+ * percebida é a mesma e o churn de temporizador some.
+ */
+const IDLE_REARM_MS = 500;
 
 /**
  * Visibilidade da dica: aparece a cada MUDANÇA de mensagem, some sozinha depois
@@ -39,7 +47,9 @@ export function useCoachHint(key: string | null, stage: HTMLElement | null): boo
   useEffect(() => {
     if (!stage || !visible) return;
     const dismiss = (): void => setVisible(false);
-    stage.addEventListener('pointerdown', dismiss);
+    // Passivo: só lê o evento, nunca chama `preventDefault` — e o toque no palco
+    // é justamente o que precisa chegar ao WebXR sem atraso.
+    stage.addEventListener('pointerdown', dismiss, { passive: true });
     return () => stage.removeEventListener('pointerdown', dismiss);
   }, [stage, visible]);
 
@@ -57,6 +67,7 @@ export function useCoachHint(key: string | null, stage: HTMLElement | null): boo
 export function useIdleChrome(root: HTMLElement | null, active: boolean): boolean {
   const [idle, setIdle] = useState(false);
   const timerRef = useRef(0);
+  const armedAtRef = useRef(0);
 
   useEffect(() => {
     if (!root || !active) {
@@ -64,18 +75,22 @@ export function useIdleChrome(root: HTMLElement | null, active: boolean): boolea
       return;
     }
 
-    const arm = (): void => {
+    const arm = (now: number): void => {
+      armedAtRef.current = now;
       window.clearTimeout(timerRef.current);
       timerRef.current = window.setTimeout(() => setIdle(true), IDLE_MS);
     };
     const wake = (): void => {
       setIdle(false);
-      arm();
+      // Durante um arraste isto chega dezenas de vezes por segundo; re-armar em
+      // todas só trocaria um temporizador por outro idêntico.
+      const now = performance.now();
+      if (now - armedAtRef.current >= IDLE_REARM_MS) arm(now);
     };
 
-    arm();
-    root.addEventListener('pointerdown', wake);
-    root.addEventListener('pointermove', wake);
+    arm(performance.now());
+    root.addEventListener('pointerdown', wake, { passive: true });
+    root.addEventListener('pointermove', wake, { passive: true });
     return () => {
       window.clearTimeout(timerRef.current);
       root.removeEventListener('pointerdown', wake);

@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 import type { ThreeNS } from '../loadThree';
-import { isWallNormal, readHitPose, wallBasis } from '../TransformUtils';
+import { isWallNormal, readHitPoseInto, wallBasis, wallBasisInto } from '../TransformUtils';
 
 /**
  * Filtro de aceite e histerese do hit-test, sem dependência de XRFrame, de
@@ -45,12 +45,15 @@ export class HitTestTracker {
   private lastHitAt = 0;
   private readonly point: THREE.Vector3;
   private readonly normalVec: THREE.Vector3;
+  /** Candidato do frame corrente, antes de virar `this.quaternion`. */
+  private readonly candidate: THREE.Quaternion;
 
   constructor(private readonly three: ThreeNS) {
     this.position = new three.Vector3();
     this.quaternion = new three.Quaternion();
     this.point = new three.Vector3();
     this.normalVec = new three.Vector3();
+    this.candidate = new three.Quaternion();
   }
 
   /** True quando o alvo já acumulou `STABLE_FRAMES` quadros válidos seguidos. */
@@ -77,27 +80,36 @@ export class HitTestTracker {
     now: number,
   ): HitOutcome {
     for (const matrix of matrices) {
-      const { normal, position } = readHitPose(matrix);
-      if (!isWallNormal(normal[1], wallToleranceDeg)) continue;
+      // Tudo escrito em campos da instância: isto roda por candidato, por frame,
+      // e a versão anterior alocava um objeto de pose e um quaternion novo em
+      // cada volta do laço.
+      readHitPoseInto(matrix, this.normalVec, this.point);
+      if (!isWallNormal(this.normalVec.y, wallToleranceDeg)) continue;
 
-      this.point.set(position[0], position[1], position[2]);
       const distance = this.point.distanceTo(cameraPosition);
       if (distance < MIN_HIT_M || distance > MAX_HIT_M) continue;
 
-      const quaternion = wallBasis(this.three, normal[0], normal[1], normal[2]);
-      if (!quaternion) continue;
+      // Antes de normalizar, como antes: a `wallBasisInto` normaliza por dentro.
+      const hasBasis = wallBasisInto(
+        this.three,
+        this.normalVec.x,
+        this.normalVec.y,
+        this.normalVec.z,
+        this.candidate,
+      );
+      if (!hasBasis) continue;
 
-      this.normalVec.set(normal[0], normal[1], normal[2]).normalize();
+      this.normalVec.normalize();
       this.point.addScaledVector(this.normalVec, WALL_GAP);
 
       if (this.stableCount === 0) {
         this.position.copy(this.point);
-        this.quaternion.copy(quaternion);
+        this.quaternion.copy(this.candidate);
       } else {
         // Poses de hit-test tremem. A maior fonte de instabilidade percebida é a
         // rotação — a wallBasis já a elimina; o lerp cuida do resto.
         this.position.lerp(this.point, SMOOTHING);
-        this.quaternion.slerp(quaternion, SMOOTHING);
+        this.quaternion.slerp(this.candidate, SMOOTHING);
       }
 
       this.stableCount++;

@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo } from 'react';
+import { forwardRef, memo, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { LoadedTexture } from '../../core/AssetLoader';
 import { makeShadowTexture, WALL_OFFSET } from '../../core/FrameBuilder';
@@ -86,7 +86,7 @@ function makeFrameShape(W: number, H: number, openW: number, openH: number): THR
   return shape;
 }
 
-export const FrameModel = forwardRef<THREE.Group, FrameModelProps>(function FrameModel(
+const FrameModelImpl = forwardRef<THREE.Group, FrameModelProps>(function FrameModel(
   { product, art, style, opacity = 1, visible = true, ambient = 1, onMetrics },
   ref,
 ) {
@@ -238,3 +238,11 @@ export const FrameModel = forwardRef<THREE.Group, FrameModelProps>(function Fram
     </group>
   );
 });
+
+/**
+ * Memo: a cena que hospeda este componente re-renderiza por estado que não muda
+ * nada aqui — o retículo virando verde, o cadeado fechando. Nesses casos as
+ * props chegam idênticas, e sem a comparação rasa o R3F reprocessaria a árvore
+ * de malhas do quadro por nada.
+ */
+export const FrameModel = memo(FrameModelImpl);

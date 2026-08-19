@@ -4,7 +4,7 @@ import { useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { GestureController } from '../../core/GestureController';
-import { clamp, wallBasis, worldPerPixel } from '../../core/TransformUtils';
+import { clamp, wallBasisInto, worldPerPixel } from '../../core/TransformUtils';
 import type { PlacementInfo, ResolvedOptions } from '../../core/types';
 
 /**
@@ -23,6 +23,14 @@ import type { PlacementInfo, ResolvedOptions } from '../../core/types';
 
 const MIN_DISTANCE_M = 0.6;
 const MAX_DISTANCE_M = 6;
+
+/**
+ * Escrachos dos caminhos quentes: `apply` roda a cada frame e os gestos rodam a
+ * cada `pointermove`. Escritos e consumidos na mesma chamada síncrona.
+ */
+const scratchVecA = new THREE.Vector3();
+const scratchVecB = new THREE.Vector3();
+const scratchVecC = new THREE.Vector3();
 
 export interface PassthroughPlacementOptions {
   /** Elemento que captura os gestos — o `.fv-stage`. */
@@ -73,6 +81,8 @@ export function usePassthroughPlacement({
   const lockedRef = useRef(false);
   /** Só depois do primeiro toque existe quadro na tela. */
   const visibleRef = useRef(false);
+  /** Retângulo do palco, medido uma vez por gesto. Ver `onAim`. */
+  const rectRef = useRef<DOMRect | null>(null);
 
   const latest = useRef({ options, onPlace, camera, size });
   latest.current = { options, onPlace, camera, size };
@@ -87,13 +97,16 @@ export function usePassthroughPlacement({
 
         if (!anchored) {
           // Enquanto posiciona, o quadro fica de frente para o usuário, em prumo.
-          const q = wallBasis(
+          // Escreve direto na base: `wallBasisInto` só toca a saída quando tem
+          // uma guinada válida, então a base antiga sobrevive ao caso degenerado
+          // exatamente como sobrevivia ao `null` de antes.
+          wallBasisInto(
             THREE,
             latest.current.camera.position.x - position.x,
             0,
             latest.current.camera.position.z - position.z,
+            baseQuaternion,
           );
-          if (q) baseQuaternion.copy(q);
         }
         // Recomposto a partir da base a cada frame, nunca incremental: um
         // `rotateZ(roll)` acumularia e faria a peça girar sozinha depois de fixada.
@@ -119,11 +132,13 @@ export function usePassthroughPlacement({
         placedRef.current = false;
         lockedRef.current = false;
         visibleRef.current = false;
+        rectRef.current = null;
       },
       reset() {
         placedRef.current = false;
         lockedRef.current = false;
         visibleRef.current = false;
+        rectRef.current = null;
         rollRef.current = 0;
         distanceRef.current = latest.current.options.assumedWallDistanceM;
         position.set(0, 0, -distanceRef.current);
@@ -158,20 +173,32 @@ export function usePassthroughPlacement({
           // Soltar o dedo fixa, como no WebXR. `onTap` sozinho não bastaria:
           // segurar e arrastar até o ponto certo não é um tap.
           if (phase === 'end') {
+            rectRef.current = null;
             if (visibleRef.current) api.place();
             return;
           }
           const { camera } = latest.current;
-          const rect = target.getBoundingClientRect();
+
+          // O retângulo é medido uma vez por gesto, no `pointerdown`. Ele é o
+          // `.fv-stage`, que ocupa `inset: 0` da raiz fixa e não se move enquanto
+          // o dedo desliza — e `getBoundingClientRect` a cada `pointermove` é uma
+          // leitura de layout forçada a 60–120 Hz, justamente enquanto o React
+          // está escrevendo dica e toast no DOM ao lado.
+          if (phase === 'start' || !rectRef.current) {
+            rectRef.current = target.getBoundingClientRect();
+          }
+          const rect = rectRef.current;
           if (!rect.width || !rect.height) return;
 
-          const ndc = new THREE.Vector3(
-            ((x - rect.left) / rect.width) * 2 - 1,
-            -((y - rect.top) / rect.height) * 2 + 1,
-            0.5,
-          ).unproject(camera);
+          const ndc = scratchVecA
+            .set(
+              ((x - rect.left) / rect.width) * 2 - 1,
+              -((y - rect.top) / rect.height) * 2 + 1,
+              0.5,
+            )
+            .unproject(camera);
 
-          const origin = new THREE.Vector3();
+          const origin = scratchVecB;
           camera.getWorldPosition(origin);
           const direction = ndc.sub(origin);
           if (direction.lengthSq() < 1e-8) return;
@@ -194,8 +221,8 @@ export function usePassthroughPlacement({
             latest.current.size.height || 1,
           );
           const matrix = latest.current.camera.matrixWorld;
-          const right = new THREE.Vector3().setFromMatrixColumn(matrix, 0);
-          const up = new THREE.Vector3().setFromMatrixColumn(matrix, 1);
+          const right = scratchVecB.setFromMatrixColumn(matrix, 0);
+          const up = scratchVecC.setFromMatrixColumn(matrix, 1);
           position.x += (right.x * dxPx - up.x * dyPx) * perPixel;
           position.y += (right.y * dxPx - up.y * dyPx) * perPixel;
           position.z += (right.z * dxPx - up.z * dyPx) * perPixel;

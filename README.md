@@ -192,7 +192,7 @@ packages/webar-frame-viewer/src/
 │   └── hooks/
 │       ├── useAR.ts            engine, ciclo de vida, fallback XR→passthrough
 │       ├── useTouchHitTest.ts  hit-test de transient input: o raio sai do dedo
-│       ├── useHitTest.ts       legado: useXRHitTest do centro da tela + histerese
+│       ├── useHitTest.ts       varredura do centro da tela + histerese (retículo)
 │       ├── usePassthrough.ts   getUserMedia + DeviceOrientation + frustum
 │       ├── usePassthroughPlacement.ts  mira / pan / pinça / roll
 │       ├── useCapture.ts       screenshot e compartilhamento
@@ -266,14 +266,18 @@ Não há o que capturar. Por isso `canCapture` é `false` e o CSS esconde `.fv-s
   não é aceitável — toda falha vira evento `error`, callback `onError` e
   `status: 'error'`.
 - **O retículo é o contorno real do produto**, não um anel genérico: o usuário vê na
-  hora se 50 × 70 cabe entre a porta e a estante. Verde quando há superfície de parede
-  detectada sob o dedo, âmbar quando a profundidade é estimada.
+  hora se 50 × 70 cabe entre a porta e a estante. Ele aparece sozinho quando a varredura
+  reconhece uma parede e salta para o dedo assim que alguém encosta na tela. Verde quando
+  há superfície detectada, âmbar quando a profundidade é estimada — o que só acontece sob
+  o dedo.
 - **Quem escolhe o lugar do quadro é o toque, nunca a detecção.** No WebXR o hit-test
   usa *transient input* (`requestHitTestSourceForTransientInput`), então o raio sai do
-  ponto tocado e não do centro da tela. A detecção só **qualifica** esse ponto: sem
-  superfície reconhecida o quadro é posicionado do mesmo jeito, na distância assumida.
-  Antes o caminho era o inverso — a ferramenta escolhia o ponto e, em parede branca e
-  lisa (que é a regra, não a exceção), não escolhia nenhum.
+  ponto tocado e não do centro da tela. A varredura do centro existe apenas para
+  **antecipar o retículo** antes do primeiro toque; ela não tem voto sobre onde a peça
+  vai. A detecção só **qualifica** o ponto: sem superfície reconhecida o quadro é
+  posicionado do mesmo jeito, na distância assumida. Antes o caminho era o inverso — a
+  ferramenta escolhia o ponto e, em parede branca e lisa (que é a regra, não a exceção),
+  não escolhia nenhum.
 
 ---
 
@@ -571,13 +575,13 @@ Na API React não existe `container`: o `<FrameViewer>` é o próprio elemento.
 | `noHitTimeoutMs` | `number` | `6000` | Tempo sem hit válido antes de oferecer posicionamento manual |
 | `wallToleranceDeg` | `number` | `15` | Tolerância angular para aceitar uma superfície como parede |
 | `threeUrl` | `string` | — | URL de um build ESM do `three`, para ambientes com CSP restritiva |
-| `debug` | `boolean` | `false` | Mostra no overlay o engine ativo e o estado dos sensores (`.fv-debug`) |
+| `debug` | `boolean` | `false` | Mostra no overlay o engine ativo, o estado dos sensores e o custo por frame — fps, ms, *draw calls*, triângulos e texturas vivas na GPU (`.fv-debug`) |
 | `locale` | `'pt-BR' \| 'en'` | `'pt-BR'` | Idioma dos textos do overlay |
 | `strings` | `Partial<Record<string, string>>` | `{}` | Sobrescreve textos individuais — ver [Textos e idiomas](#textos-e-idiomas) |
 | `onReady` | `() => void` | — | Disparado quando o estado chega a `'ready'` |
 | `onPlace` | `(info: PlacementInfo) => void` | — | Quadro fixado |
 | `onError` | `(err: ARError) => void` | — | Qualquer falha |
-| `onClose` | `() => void` | — | Usuário fechou o overlay |
+| `onClose` | `() => void` | — | Usuário fechou o overlay (só o ✕ — sair da sessão AR volta ao `idle` sem fechar) |
 
 > **Por que `autoStart` é `false` por padrão:** `requestSession('immersive-ar')` **exige**
 > ativação do usuário — sem um toque, o Chrome lança `SecurityError`. De quebra, o portão
@@ -653,6 +657,8 @@ stateDiagram-v2
     ready --> placing
     placing --> placed: soltar o dedo — ancora no ponto tocado
     placed --> placing: reset() — botão "Reposicionar"
+    placing --> idle: sessão XR encerrada por fora
+    placed --> idle: sessão XR encerrada por fora — pose guardada
     placing --> paused: pause()
     placed --> paused: pause()
     paused --> ready: resume()
@@ -677,6 +683,7 @@ interface PlacementInfo {
   distanceMeters: number;                        // câmera → quadro
   // 'hit-test' = havia parede detectada sob o dedo, profundidade medida.
   // 'manual'   = distância assumida (`assumedWallDistanceM`).
+  // 'auto'     = pose restaurada de uma sessão AR anterior — ver "Sair e voltar ao AR".
   source: 'hit-test' | 'manual' | 'auto';
 
   position: { x: number; y: number; z: number }; // em metros
@@ -796,8 +803,14 @@ são recalculados por `useMemo` sem tocar na sessão.
 
 Além do componente, o pacote exporta os hooks (`useAR`, `useHitTest`, `usePassthrough`,
 `useCapture`, `useArtTexture`) e os componentes internos (`ARCanvas`, `FrameModel`,
-`Reticle`, `Overlay`, `XRScene`, `PassthroughScene`) para quem precisar montar a própria
-cena. `<FrameModel>` aceita `product`, `art`, `style`, `opacity`, `ambient` e `visible`.
+`Reticle`, `Overlay`, `XRScene`, `XRSessionGate`, `PassthroughScene`) para quem precisar
+montar a própria cena. `<FrameModel>` aceita `product`, `art`, `style`, `opacity`,
+`ambient` e `visible`.
+
+> Ao montar a própria cena WebXR, envolva-a num `<XRSessionGate api={api}>`: é ele que
+> devolve o overlay a `idle` quando a sessão termina por fora e que desmonta a cena junto
+> com a sessão — sem isso, a âncora da sessão anterior sobrevive e envenena o `getPose`
+> da seguinte.
 
 ---
 
@@ -861,20 +874,41 @@ O JavaScript só troca atributos; o CSS faz o resto. Use-os para condicionar seu
 
 ### Fluxo de posicionamento
 
-Nada é posicionado automaticamente: ao abrir a câmera a cena fica vazia até o usuário
-encostar o dedo onde quer o quadro. Enquanto o dedo está na tela a peça aparece
-translúcida naquele ponto; soltar **ancora**, mas não trava. Entre ancorar e travar
-existe uma janela de ajuste fino em que arrastar o dedo move a peça — nos dois engines. O
-cadeado 🔒 é o que congela de vez, e é também a única forma de destravar. Um toque na
-tela nunca solta um quadro já ancorado.
+Nada é posicionado automaticamente. Ao abrir a câmera a cena fica vazia; quando a
+varredura reconhece uma parede, o **contorno** do produto aparece no centro da tela,
+avisando que há onde fixar. Quem escolhe o lugar continua sendo o dedo: encostar leva o
+contorno — e a peça, translúcida — para o ponto tocado, e soltar **ancora**, mas não
+trava. Entre ancorar e travar existe uma janela de ajuste fino em que arrastar o dedo
+move a peça — nos dois engines. O cadeado 🔒 congela de vez; para reabrir o ajuste, toque
+no **próprio quadro**. Um toque fora dele nunca solta um quadro já ancorado.
 
 | Passo | `data-fv-state` | `data-fv-lock` | Dica | Gestos |
 |---|---|---|---|---|
-| Escolher o lugar | `placing` | `0` | `hint.tap-to-place` | tela limpa, esperando o dedo |
+| Procurar a parede | `placing` | `0` | `hint.tap-to-place` · `hint.aim-wall` · `hint.move-slower` | contorno no centro quando há parede detectada |
 | Mirar | `placing` | `0` | `hint.hold-to-aim` | dedo na tela: o quadro segue o ponto tocado |
 | Posicionar | `placing` → `placed` | `0` | — | soltar o dedo ancora |
 | Ajustar | `placed` | `0` | `hint.adjust` | arrastar move |
-| Travado | `placed` | `1` | `hint.placed` | nenhum |
+| Travado | `placed` | `1` | `hint.placed` | tocar no quadro reabre o ajuste |
+| Sair do AR | → `idle` | `0` | — | o botão de iniciar volta; a pose fica guardada |
+
+### Sair e voltar ao AR
+
+Encerrar a sessão por fora — *back* do Android, botão do sistema — devolve o overlay a
+`idle` **sem fechar o viewer**: o botão "Ver na minha parede" reaparece e a próxima
+entrada aproveita as capacidades já detectadas. `onClose` **não** dispara nesse caminho;
+ele continua significando "o usuário fechou o overlay" e só sai do ✕.
+
+Se havia um quadro ancorado, a pose é guardada **em memória** e restaurada na entrada
+seguinte, com `onPlace` recebendo `source: 'auto'` e um aviso na tela. A restauração é
+**aproximada por natureza**: cada `XRSession` cria um espaço de referência próprio e as
+âncoras não sobrevivem ao fim da sessão, então o que se guarda é a pose *relativa ao
+observador* — distância, lateralidade, altura e ângulo. O que volta fiel é o tamanho na
+parede e a distância; o que não volta é o vínculo com o cômodo: se o usuário andou dois
+passos entre sair e voltar, o quadro reaparece deslocado por esse tanto. Por isso ele
+volta **destravado**, já na janela de ajuste.
+
+O escopo é o do `<FrameViewer>` montado: recarregar a página zera, e fechar no ✕ também,
+porque o integrador costuma desmontar o viewer nesse callback. Não há `localStorage`.
 
 > **Mudança visual em `.fv-hint` desde a v0.1.0:** a dica deixou de ter fundo e
 > `border-radius` — agora é só texto branco com sombra, para não tapar a parede que o
@@ -908,6 +942,12 @@ raio `999px`, alvo de toque mínimo de 48 px, `z-index: 2147483000`, e o *safe a
 já aplicado nas quatro bordas. O retículo do WebXR é âmbar `#f59e0b` → verde `#22c55e` e
 é definido em JavaScript, não em CSS.
 
+Uma exceção importante: **com a câmera no ar, o `backdrop-filter` dos botões é
+desligado** e o fundo passa a `rgba(20,20,20,0.82)` sólido — nos estados `ready`,
+`placing` e `placed`, e sob `:xr-overlay`. Desfocar o *backdrop* obriga o navegador
+a recompor a imagem da câmera a cada frame, para 3–4 botões parados na tela durante
+toda a sessão. Se o seu tema reintroduz o blur, reintroduza-o só fora desses estados.
+
 ---
 
 ## Textos e idiomas
@@ -938,6 +978,7 @@ sobrescrita por `options.strings`:
 | `unlock` | Destravar posição | Unlock position |
 | `toast.locked` | Posição travada | Position locked |
 | `toast.unlocked` | Posição liberada para ajuste | Free to adjust |
+| `toast.restored` | Posição aproximada — arraste para ajustar | Approximate position — drag to adjust |
 | `reposition` | Reposicionar | Reposition |
 | `manual` | Posicionar manualmente | Place manually |
 | `keepTrying` | Continuar tentando | Keep trying |
@@ -952,7 +993,7 @@ sobrescrita por `options.strings`:
 | `hint.drag-to-move` | Arraste para mover · pince para ajustar a distância | Drag to move · pinch to adjust the distance |
 | `hint.no-yaw` | Seu aparelho não rastreia giros na horizontal. Mantenha o celular parado, arraste o quadro e toque para fixar. | Your device does not track horizontal rotation. Hold the phone still, drag the frame and tap to lock it. |
 | `hint.adjust` | Arraste para ajustar · 🔒 trava | Drag to adjust · 🔒 locks |
-| `hint.placed` | Quadro travado | Frame locked |
+| `hint.placed` | Quadro travado · toque nele para ajustar | Frame locked · tap it to adjust |
 
 As chaves `hint.*` correspondem 1:1 aos valores de `ARHint`.
 
@@ -965,8 +1006,11 @@ As chaves `hint.*` correspondem 1:1 aos valores de `ARHint`.
 - [ ] **CORS no CDN das imagens.** Sem `Access-Control-Allow-Origin`, o WebGL recusa
       *uploads* de textura *cross-origin* (`texImage2D` lança `SECURITY_ERR`).
       **Isso é falha total, não degradação** — teste no CDN de produção antes de integrar.
-- [ ] **Imagens de até ~1024 px.** Acima de 2048 px a lib reduz automaticamente e avisa
-      no console; o custo é largura de banda e tempo de decodificação no celular.
+- [ ] **Imagens de até ~1024 px.** Acima disso a lib reduz automaticamente e avisa no
+      console; o custo é largura de banda e tempo de decodificação no celular. O teto é
+      1024 px porque 1024² são ~5,6 MB de VRAM com *mipmaps* contra ~21 MB de 2048², num
+      aparelho que ao mesmo tempo sustenta o feed da câmera e o compositor XR — e a
+      resolução extra não chega à tela: a nitidez em ângulo rasante vem da anisotropia.
 - [ ] **Medidas em centímetros, externas, com moldura.** É o número que o cliente
       compara com a fita métrica.
 - [ ] **`three` instalado como peer dependency** na faixa `>=0.160.0 <1.0.0`. Se a CSP da
@@ -1148,7 +1192,7 @@ Instagram/Facebook o `getUserMedia` é bloqueado pela plataforma.
 | `Nenhum loader do three registrado` | O entry UMD ou o CDN não foi alcançado, ou você importou de um caminho não previsto | Chame `provideThree()` antes de `start()` |
 | Sessão XR não abre e volta para `idle` | `SecurityError` por falta de ativação do usuário | Não use `autoStart: true`; deixe o usuário tocar no botão |
 | Nada aparece ao abrir a câmera | Comportamento esperado | O quadro só surge quando o dedo encosta na tela — é o usuário quem escolhe o ponto |
-| Aviso `textura NxN acima do recomendado` | Imagem maior que 2048 px | Sirva a arte em até ~1024 px |
+| Aviso `textura NxN acima do recomendado` | Imagem maior que 1024 px | Sirva a arte em até ~1024 px |
 
 ---
 

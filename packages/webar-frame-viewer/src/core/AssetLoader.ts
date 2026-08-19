@@ -22,7 +22,16 @@ const cache = new Map<string, Entry>();
 /** ~6 texturas de 1024² com mipmaps. Segura a navegação típica sem estourar memória. */
 const IDLE_BUDGET_BYTES = 32 * 1024 * 1024;
 const TIMEOUT_MS = 12_000;
-const MAX_DIMENSION = 2048;
+/**
+ * Teto da textura da arte.
+ *
+ * 1024² são ~5,6 MB de VRAM com mipmaps; 2048² seriam ~21 MB — quase quatro
+ * vezes mais, num aparelho que ao mesmo tempo sustenta o feed da câmera e o
+ * compositor XR. E a resolução extra não chega à tela: o quadro ocupa uma
+ * fração da viewport a 2 m de distância, e o ganho de nitidez em ângulo rasante
+ * quem entrega é a anisotropia, não o número de texels.
+ */
+const MAX_DIMENSION = 1024;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

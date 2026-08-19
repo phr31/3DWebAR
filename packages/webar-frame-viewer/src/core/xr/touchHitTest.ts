@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 import type { ThreeNS } from '../loadThree';
-import { isWallNormal, readHitPose, wallBasis } from '../TransformUtils';
+import { isWallNormal, readHitPoseInto, wallBasisInto } from '../TransformUtils';
 import { MAX_HIT_M, MIN_HIT_M, WALL_GAP } from './hitTest';
 
 /**
@@ -23,6 +23,12 @@ export type TouchQuality = 'plane' | 'estimated';
  * @param rayOrigin  Origem do raio do toque, em coordenadas de mundo.
  * @param rayDirection  Direção normalizada do raio do toque.
  */
+/**
+ * Normal do hit do frame corrente. Escracho de módulo: esta função roda a cada
+ * frame enquanto o dedo está na tela, e é sempre consumida antes de retornar.
+ */
+let hitNormal: THREE.Vector3 | null = null;
+
 export function resolveTouchCandidate(
   three: ThreeNS,
   hitMatrix: ArrayLike<number> | null,
@@ -33,35 +39,38 @@ export function resolveTouchCandidate(
   outPosition: THREE.Vector3,
   outQuaternion: THREE.Quaternion,
 ): TouchQuality {
-  // Prumo virado para o usuário: a orientação de reserva, usada tanto sem hit
-  // quanto com hit de normal inaproveitável.
-  const plumb = wallBasis(three, -rayDirection.x, 0, -rayDirection.z);
-
+  /**
+   * O prumo virado para o usuário é a orientação de reserva, e é montado SOB
+   * DEMANDA. Antes ele era calculado no topo da função, inclusive no caso bom —
+   * em que a parede foi detectada e ele é jogado fora. A linha aparece duas
+   * vezes abaixo em vez de virar uma closure: uma closure por chamada seria uma
+   * alocação por frame, que é justamente o que se está eliminando aqui.
+   *
+   * Escrever direto em `outQuaternion` é seguro porque todo caminho que a
+   * alcança é terminal, e `wallBasisInto` não toca a saída quando não há guinada
+   * válida — o mesmo que o `if (plumb)` da versão anterior fazia.
+   */
   if (hitMatrix) {
-    const { normal, position } = readHitPose(hitMatrix);
-    outPosition.set(position[0], position[1], position[2]);
+    hitNormal ??= new three.Vector3();
+    const normal = hitNormal;
+    readHitPoseInto(hitMatrix, normal, outPosition);
     const distance = outPosition.distanceTo(rayOrigin);
 
     if (distance >= MIN_HIT_M && distance <= MAX_HIT_M) {
-      const wall = isWallNormal(normal[1], wallToleranceDeg)
-        ? wallBasis(three, normal[0], normal[1], normal[2])
-        : null;
-
       // A POSIÇÃO do hit vale mesmo quando a normal não presta — ela é a
       // profundidade medida, que é justamente o que dá fidedignidade ao que o
       // usuário vê. Só a orientação cai no prumo. É também o que torna
       // `entityTypes: ['plane','point']` seguro: de um feature point aproveitamos
       // o ponto e descartamos a orientação, que é lixo.
-      if (wall) {
-        outQuaternion.copy(wall);
-        outPosition.addScaledVector(
-          new three.Vector3(normal[0], normal[1], normal[2]).normalize(),
-          WALL_GAP,
-        );
+      if (
+        isWallNormal(normal.y, wallToleranceDeg) &&
+        wallBasisInto(three, normal.x, normal.y, normal.z, outQuaternion)
+      ) {
+        outPosition.addScaledVector(normal.normalize(), WALL_GAP);
         return 'plane';
       }
 
-      if (plumb) outQuaternion.copy(plumb);
+      wallBasisInto(three, -rayDirection.x, 0, -rayDirection.z, outQuaternion);
       outPosition.addScaledVector(rayDirection, -WALL_GAP);
       return 'estimated';
     }
@@ -72,7 +81,7 @@ export function resolveTouchCandidate(
   // Ao contrário de `manualCandidate`, a altura NÃO é forçada para a da câmera:
   // aqui o usuário apontou o ponto, e um toque no alto da parede tem que colocar
   // o quadro no alto da parede.
-  if (plumb) outQuaternion.copy(plumb);
+  wallBasisInto(three, -rayDirection.x, 0, -rayDirection.z, outQuaternion);
   outPosition.copy(rayOrigin).addScaledVector(rayDirection, assumedDistanceM);
   return 'estimated';
 }

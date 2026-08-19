@@ -108,6 +108,30 @@
   transition: opacity 0.4s;
 }
 
+/* Com a câmera no ar, o blur sai.
+
+   `backdrop-filter` obriga o navegador a recompor o que está ATRÁS do elemento a
+   cada frame — e atrás, aqui, está a imagem da câmera, que muda sempre. São 3–4
+   botões parados na tela durante toda a sessão, num aparelho que já está
+   sustentando ARCore, compositor XR e feed de vídeo ao mesmo tempo. Fora da
+   sessão ele fica: ali o fundo é a página parada e o custo é pago uma vez.
+
+   `:xr-overlay` cobre o WebXR; os estados de câmera no ar cobrem o passthrough,
+   que não tem sessão XR nenhuma. `:not(.fv-btn--primary)` preserva o verde do
+   botão de ação, cuja cor é sinal e não decoração. */
+/* biome-ignore lint/correctness/noUnknownPseudoClass: `:xr-overlay` é da spec de
+   WebXR DOM Overlays, ainda ausente da lista do Biome. */
+.fv-root:xr-overlay .fv-btn:not(.fv-btn--primary),
+.fv-root[data-fv-state="ready"] .fv-btn:not(.fv-btn--primary),
+.fv-root[data-fv-state="placing"] .fv-btn:not(.fv-btn--primary),
+.fv-root[data-fv-state="placed"] .fv-btn:not(.fv-btn--primary) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  /* Sem o blur o contraste passa a vir só do fundo: 0.82 segura o rótulo legível
+     sobre parede clara, que é o pior caso. */
+  background: rgba(20, 20, 20, 0.82);
+}
+
 .fv-btn--primary {
   background: #16a34a;
 }

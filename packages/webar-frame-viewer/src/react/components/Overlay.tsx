@@ -133,6 +133,18 @@ export function Overlay({
               ` · α ${state.debug.angles.alpha.toFixed(0)} β ${state.debug.angles.beta.toFixed(
                 0,
               )} γ ${state.debug.angles.gamma.toFixed(0)}`}
+            {/* Segunda linha só depois do primeiro frame medido: antes disso
+                `frameMs` é 0 e o fps sairia como Infinity. */}
+            {state.debug.frameMs != null && state.debug.frameMs > 0 && (
+              <>
+                <br />
+                {`${(1000 / state.debug.frameMs).toFixed(0)} fps · ${state.debug.frameMs.toFixed(
+                  1,
+                )} ms · ${state.debug.calls ?? 0} calls · ${state.debug.tris ?? 0} tris · ${
+                  state.debug.textures ?? 0
+                } tex`}
+              </>
+            )}
           </p>
         )}
 

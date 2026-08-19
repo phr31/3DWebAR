@@ -1,19 +1,17 @@
 'use client';
 
 import { useFrame } from '@react-three/fiber';
-import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type * as THREE from 'three';
 import type { LoadedTexture } from '../../core/AssetLoader';
 import type { ARError } from '../../core/errors';
 import type { YawStatus } from '../../core/passthrough/orientation';
 import type { FrameStyle, ProductData, ResolvedOptions } from '../../core/types';
 import type { ARApi } from '../hooks/useAR';
+import { DEBUG_INTERVAL_MS, useFrameStats } from '../hooks/useFrameStats';
 import { usePassthrough } from '../hooks/usePassthrough';
 import { usePassthroughPlacement } from '../hooks/usePassthroughPlacement';
 import { FrameModel } from './FrameModel';
-
-/** Período do HUD de debug e da leitura do yaw. 4 Hz não pesa no render. */
-const DEBUG_INTERVAL_MS = 250;
 
 /**
  * Cena do caminho de passthrough (iOS e qualquer aparelho sem WebXR).
@@ -34,7 +32,7 @@ export interface PassthroughSceneProps {
   stage: HTMLElement | null;
 }
 
-export function PassthroughScene({
+function PassthroughSceneImpl({
   product,
   art,
   style,
@@ -54,6 +52,8 @@ export function PassthroughScene({
 
   const onError = useCallback((error: ARError) => api.fail(error, 'camera'), [api]);
   const onLost = useCallback(() => api.fail(new Error('camera track ended'), 'runtime'), [api]);
+
+  const stats = useFrameStats(options.debug);
 
   const passthrough = usePassthrough({
     videoRef,
@@ -142,6 +142,7 @@ export function PassthroughScene({
           hasOrientation: passthrough.hasOrientationRef.current,
           angles: passthrough.anglesRef.current,
           yaw: current,
+          ...stats.current,
         });
       }
     }
@@ -163,3 +164,10 @@ export function PassthroughScene({
     />
   );
 }
+
+/**
+ * Memo: o elemento é filho do `<Canvas>`, que o R3F reconcilia a cada render do
+ * componente que o hospeda. Todas as props aqui já são estáveis (`api` sai de um
+ * `useMemo`, `style` é `options.frame`), então a comparação rasa acerta sempre.
+ */
+export const PassthroughScene = memo(PassthroughSceneImpl);
