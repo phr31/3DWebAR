@@ -14,13 +14,14 @@ import {
   relativeFramePose,
   worldPerPixel,
 } from '../../core/TransformUtils';
-import type { ARHint, FrameStyle, ProductData, ResolvedOptions } from '../../core/types';
+import type { ARHint, FrameStyle, KitItem, ResolvedOptions } from '../../core/types';
 import { ambientFromLightEstimate } from '../../core/xr/hitTest';
 import type { ARApi } from '../hooks/useAR';
 import { DEBUG_INTERVAL_MS, useFrameStats } from '../hooks/useFrameStats';
 import { useHitTest } from '../hooks/useHitTest';
 import { useTouchHitTest } from '../hooks/useTouchHitTest';
-import { type FrameMetrics, FrameModel } from './FrameModel';
+import type { FrameMetrics } from './FrameModel';
+import { KitModel } from './KitModel';
 import { Reticle } from './Reticle';
 
 /**
@@ -125,8 +126,10 @@ function readEventRay(
 }
 
 export interface XRSceneProps {
-  product: ProductData;
-  art: LoadedTexture;
+  /** As peças do conteúdo. Um produto solto chega aqui como lista de uma. */
+  items: KitItem[];
+  /** Uma textura por peça, na mesma ordem. */
+  arts: LoadedTexture[];
   style: Required<FrameStyle>;
   options: ResolvedOptions;
   api: ARApi;
@@ -135,8 +138,8 @@ export interface XRSceneProps {
 }
 
 function XRSceneImpl({
-  product,
-  art,
+  items,
+  arts,
   style,
   options,
   api,
@@ -764,10 +767,10 @@ function XRSceneImpl({
 
   return (
     <>
-      <FrameModel
+      <KitModel
         ref={groupRef}
-        product={product}
-        art={art}
+        items={items}
+        arts={arts}
         style={style}
         ambient={ambient}
         // 0.85 sob o dedo deixa claro que ainda não está fixado.

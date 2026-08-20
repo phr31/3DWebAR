@@ -16,6 +16,7 @@ export * from '../core/public';
 export { ARCanvas, type ARCanvasProps } from './components/ARCanvas';
 export { CoachIcon, type CoachIconProps } from './components/CoachIcon';
 export { type FrameMetrics, FrameModel, type FrameModelProps } from './components/FrameModel';
+export { KitModel, type KitModelProps } from './components/KitModel';
 export { LockButton, type LockButtonProps } from './components/LockButton';
 export { Overlay, type OverlayProps } from './components/Overlay';
 export { PassthroughScene, type PassthroughSceneProps } from './components/PassthroughScene';
@@ -25,7 +26,12 @@ export { XRSessionGate, type XRSessionGateProps } from './components/XRSessionGa
 export { FrameViewer, type FrameViewerProps } from './FrameViewer';
 // Hooks.
 export { type ARApi, hintText, type UseAROptions, useAR } from './hooks/useAR';
-export { type ArtTextureResult, useArtTexture } from './hooks/useArtTexture';
+export {
+  type ArtTextureResult,
+  type ArtTexturesResult,
+  useArtTexture,
+  useArtTextures,
+} from './hooks/useArtTexture';
 export { type CaptureOptions, type CaptureResult, useCapture } from './hooks/useCapture';
 export { type FrameStats, useFrameStats } from './hooks/useFrameStats';
 export { type HitTestOptions, type HitTestResult, useHitTest } from './hooks/useHitTest';

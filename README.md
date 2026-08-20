@@ -187,6 +187,7 @@ packages/webar-frame-viewer/src/
 │   │   ├── XRScene.tsx         caminho WebXR: mira no dedo, hit-test, âncora
 │   │   ├── PassthroughScene.tsx caminho iOS: vídeo + giroscópio + gestos
 │   │   ├── FrameModel.tsx      o quadro 3D, declarativo
+│   │   ├── KitModel.tsx        N quadros num grupo só (o kit é bloco único)
 │   │   ├── Reticle.tsx         contorno real do produto (âmbar → verde)
 │   │   └── Overlay.tsx         a interface, com os mesmos data-fv-*
 │   └── hooks/
@@ -196,7 +197,8 @@ packages/webar-frame-viewer/src/
 │       ├── usePassthrough.ts   getUserMedia + DeviceOrientation + frustum
 │       ├── usePassthroughPlacement.ts  mira / pan / pinça / roll
 │       ├── useCapture.ts       screenshot e compartilhamento
-│       └── useArtTexture.ts    ponte para o AssetLoader (refcount, CORS)
+│       └── useArtTexture.ts    ponte para o AssetLoader (refcount, CORS) — e a
+│                               variante de N URLs para o kit
 ├── core/                       lógica compartilhada, sem React e sem `three` estático
 │   ├── public.ts               ⭐ entry `/core` — server-safe, sem "use client"
 │   ├── xr/touchHitTest.ts      pose do quadro no ponto tocado (nunca recusa)
@@ -210,7 +212,9 @@ packages/webar-frame-viewer/src/
 │   ├── capture.ts              compõe vídeo + WebGL em JPEG e compartilha
 │   ├── errors.ts               ARError, 15 códigos, mensagens pt-BR/en
 │   ├── events.ts · options.ts · types.ts
+│   ├── kitLayout.ts            arranjo, bounding box e métricas do kit — pura
 │   ├── FrameBuilder.ts         versão imperativa da malha (usada pelo UMD)
+│   ├── KitBuilder.ts           compõe N quadros num BuiltFrame só (UMD)
 │   ├── ARController.ts         orquestrador imperativo (usado pelo UMD)
 │   ├── SceneManager.ts         a interface que os dois engines implementam
 │   └── engines/                WebXRSceneManager · PassthroughSceneManager (UMD)
@@ -541,7 +545,8 @@ chama `destroy()` na limpeza do `useEffect`.
 ```ts
 interface ViewerConfig {
   container: HTMLElement;   // o overlay é anexado aqui
-  product: ProductData;
+  product?: ProductData;    // um quadro…
+  kit?: KitData;            // …ou um conjunto. Mutuamente exclusivos
   options?: ViewerOptions;
 }
 ```
@@ -559,6 +564,69 @@ Na API React não existe `container`: o `<FrameViewer>` é o próprio elemento.
 | `depthCm` | `number` | `3` | Profundidade da peça |
 | `title` | `string` | `''` | Nome exibido no topo do overlay |
 | `frameUrl` | `string` | — | Reservado para uma moldura vinda de asset externo. **Ignorado nesta versão** |
+
+### Kits — `KitData`, `KitItem` e `layoutKit`
+
+Um **kit** é um conjunto de quadros posicionado como **bloco único**: um hit-test,
+uma âncora, um arraste move tudo. O retículo e a área de toque passam a valer para
+o *bounding box* do conjunto, e a foto sai com o nome `kit-<id>.jpg`.
+
+```ts
+interface KitData {
+  id: string;
+  title?: string;
+  items: KitItem[];   // pelo menos uma
+}
+
+interface KitItem extends ProductData {
+  offsetXCm?: number;   // do CENTRO da peça à origem do arranjo
+  offsetYCm?: number;   // +X à direita, +Y para cima
+  frame?: FrameStyle;   // sobrescreve `options.frame` só nesta peça
+}
+```
+
+Os offsets podem ser escritos à mão — é o que permite uma composição de galeria
+assimétrica — ou preenchidos por `layoutKit`, que é **aritmética pura** e por isso
+vive em `/core`: dá para calcular o arranjo num Server Component.
+
+```ts
+import { type KitData, kitBounds, layoutKit } from 'webar-frame-viewer/core';
+
+const kit: KitData = {
+  id: 'kit-trio',
+  title: 'Trio Abstrato',
+  items: layoutKit(
+    [
+      { id: 'a', imageUrl: '/a.png', widthCm: 30, heightCm: 40 },
+      { id: 'b', imageUrl: '/b.png', widthCm: 30, heightCm: 40 },
+      { id: 'c', imageUrl: '/c.png', widthCm: 30, heightCm: 40 },
+    ],
+    { layout: 'row', gapCm: 8 },
+  ),
+};
+
+kitBounds(kit.items).widthCm;   // 106 — quanto de parede o conjunto ocupa
+```
+
+| Preset | Arranjo |
+|---|---|
+| `'row'` | Lado a lado, centros na mesma altura |
+| `'stack'` | Empilhado na vertical, centros no mesmo eixo |
+| `'grid'` | Células uniformes do tamanho da maior peça; `columns` define a largura da grade (padrão: raiz quadrada arredondada para cima) |
+
+`gapCm` (padrão `6`) é o vão entre as **bordas**, não entre os centros — então
+peças de tamanhos diferentes ficam com espaçamento visualmente igual.
+
+**Detalhes que importam:**
+
+- `layoutKit` **não sobrescreve** offsets já preenchidos: o preset é conveniência,
+  não imposição. E devolve um array novo — nada é mutado.
+- A origem do arranjo é livre. Escrever `0, 60, 120` dá exatamente a mesma cena que
+  `-60, 0, 60`, porque a renderização sempre recentra pelo *bounding box*.
+- A mesma arte em duas peças custa **uma** textura na GPU: o `AssetLoader` conta
+  referências por URL.
+- Um kit de uma peça é indistinguível de um produto solto — mesma geometria, mesmas
+  métricas.
 
 ### `ViewerOptions`
 
@@ -630,6 +698,7 @@ Retornado por `window.FrameViewer.create()`.
 | `reset` | `() => void` | Solta o quadro e volta a procurar |
 | `capture` | `() => Promise<Blob \| null>` | JPEG da cena; `null` no WebXR |
 | `setProduct` | `(product: ProductData) => Promise<void>` | Troca a arte sem reiniciar a sessão |
+| `setKit` | `(kit: KitData) => Promise<void>` | Troca o conjunto. Mesmo contrato do `setProduct`: carrega o novo, monta, e só então solta as texturas do anterior — a troca não pisca |
 | `destroy` | `() => Promise<void>` | Libera tudo. Idempotente |
 
 ### Eventos (`AREventMap`)
@@ -788,7 +857,8 @@ clearAssets();
 
 | Prop | Tipo | Descrição |
 |---|---|---|
-| `product` | `ProductData` | Obrigatória |
+| `product` | `ProductData` | Um quadro. Exclusiva com `kit` — uma das duas é obrigatória |
+| `kit` | `KitData` | Um conjunto, posicionado como bloco único. Exclusiva com `product` |
 | `options` | `Omit<ViewerOptions, 'onClose' \| 'onPlace' \| 'onError' \| 'onReady'>` | Os *callbacks* são props de primeiro nível |
 | `autoStart` | `boolean` | Padrão `false` |
 | `onReady` / `onPlace` / `onError` / `onClose` | funções | — |
@@ -798,14 +868,28 @@ clearAssets();
 não derruba a sessão de AR: se as funções entrassem nas dependências dos efeitos, todo
 re-render do componente pai reabriria a câmera. O mesmo vale para `options`.
 
-A textura é trocada quando `product.imageUrl` muda; as dimensões e o estilo da moldura
-são recalculados por `useMemo` sem tocar na sessão.
+**`product` e `kit` também são comparados por assinatura estrutural, não por
+identidade.** Passar `kit={{ id: 'x', items: [...] }}` inline é seguro: um objeto novo
+com o mesmo conteúdo não reconstrói a árvore 3D. Só uma mudança real de conteúdo troca
+as texturas; dimensões e estilo da moldura são recalculados por `useMemo` sem tocar na
+sessão.
 
 Além do componente, o pacote exporta os hooks (`useAR`, `useHitTest`, `usePassthrough`,
-`useCapture`, `useArtTexture`) e os componentes internos (`ARCanvas`, `FrameModel`,
-`Reticle`, `Overlay`, `XRScene`, `XRSessionGate`, `PassthroughScene`) para quem precisar
-montar a própria cena. `<FrameModel>` aceita `product`, `art`, `style`, `opacity`,
-`ambient` e `visible`.
+`useCapture`, `useArtTexture`, `useArtTextures`) e os componentes internos (`ARCanvas`,
+`FrameModel`, `KitModel`, `Reticle`, `Overlay`, `XRScene`, `XRSessionGate`,
+`PassthroughScene`) para quem precisar montar a própria cena.
+
+- `<FrameModel>` aceita `product`, `art`, `style`, `opacity`, `ambient`, `visible`,
+  `position` e `lights`.
+- `<KitModel>` aceita `items`, `arts`, `style`, `opacity`, `ambient` e `visible`, e
+  reporta em `onMetrics` o *bounding box* do conjunto. Ele emite o par de luzes **uma
+  vez** e passa `lights={false}` a cada peça: N quadros dariam 2N luzes na cena, e cada
+  contagem nova recompila o shader da moldura.
+
+> **Mudança quebradora em 0.1.x:** `<XRScene>` e `<PassthroughScene>` trocaram as props
+> `product`/`art` por `items: KitItem[]` / `arts: LoadedTexture[]`. Um produto solto vira
+> uma lista de um. Nada mais nesses componentes mudou — hit-test, âncora, gestos e
+> retículo continuam operando sobre um grupo só, que agora é o do conjunto.
 
 > Ao montar a própria cena WebXR, envolva-a num `<XRSessionGate api={api}>`: é ele que
 > devolve o overlay a `idle` quando a sessão termina por fora e que desmonta a cena junto

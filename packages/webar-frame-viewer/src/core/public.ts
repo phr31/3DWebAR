@@ -16,14 +16,30 @@ export {
   type Locale,
   userMessage,
 } from './errors';
+export {
+  type KitBounds,
+  type KitLayout,
+  type KitLayoutOptions,
+  kitBounds,
+  layoutKit,
+} from './kitLayout';
 export { provideThree, type ThreeLoader } from './loadThree';
-export { resolveOptions, validateProduct } from './options';
+export {
+  resolveContent,
+  resolveOptions,
+  type ViewerContent,
+  validateContent,
+  validateKit,
+  validateProduct,
+} from './options';
 export type {
   AREventMap,
   ARHint,
   ARStatus,
   FitMode,
   FrameStyle,
+  KitData,
+  KitItem,
   PlacementInfo,
   ProductData,
   ResolvedOptions,

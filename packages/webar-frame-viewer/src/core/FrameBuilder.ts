@@ -4,12 +4,87 @@ import type { ThreeNS } from './loadThree';
 import { clamp, cmToM, computeFit } from './TransformUtils';
 import type { FrameStyle, ProductData } from './types';
 
+/** Folga entre a face de trás e o plano da parede, evitando z-fighting. */
+export const WALL_OFFSET = 0.002;
+
+/**
+ * A iluminação do quadro, num lugar só.
+ *
+ * Quatro pontos precisam emitir exatamente estas luzes — `buildFrame`,
+ * `buildKit`, `<FrameModel>` e `<KitModel>` — e a moldura é o único
+ * `MeshStandardMaterial` da cena: qualquer divergência aqui faz o mesmo produto
+ * parecer de cores diferentes entre o caminho UMD e o React.
+ */
+export const FRAME_LIGHTS = {
+  ambientIntensity: 2.0,
+  directionalIntensity: 2.2,
+  directionalPosition: [-0.4, 0.8, 1.0] as [number, number, number],
+} as const;
+
 export interface FrameMetrics {
   outer: { w: number; h: number; d: number };
   opening: { w: number; h: number };
   artwork: { w: number; h: number };
   imageAspect: number;
   croppedFraction: number;
+}
+
+/** Medidas derivadas de um quadro, todas em METROS. */
+export interface FrameDimensions {
+  W: number;
+  H: number;
+  D: number;
+  /** Largura da barra da moldura, já clampada. Zero = sem moldura. */
+  bar: number;
+  openW: number;
+  openH: number;
+  artW: number;
+  artH: number;
+  /** Z da face frontal. */
+  frontZ: number;
+  /** Rebaixo da boca da moldura. */
+  recess: number;
+}
+
+/**
+ * A geometria de um quadro, em metros, sem tocar no three.
+ *
+ * Existe como função pura porque TRÊS lugares precisam exatamente destas contas
+ * e não podem divergir: `buildFrame` (UMD), `useFrameGeometry` (R3F) e
+ * `kitMetrics` (bounding box do kit). Antes, os dois primeiros mantinham cópias
+ * idênticas do bloco.
+ */
+export function frameDimensions(
+  product: Pick<ProductData, 'widthCm' | 'heightCm' | 'depthCm'>,
+  // Só estas duas chaves entram na geometria. Declarar o mínimo deixa o
+  // `useFrameGeometry` listar dependências honestas em vez de um `style` inteiro
+  // que invalidaria a cada troca de cor.
+  style: Pick<Required<FrameStyle>, 'frameWidthCm' | 'matCm'>,
+): FrameDimensions {
+  const W = cmToM(product.widthCm);
+  const H = cmToM(product.heightCm);
+  const D = cmToM(product.depthCm ?? 3);
+
+  // Clamp para mini-quadros: uma barra de 2 cm num 10×10 comeria quase tudo.
+  const bar = Math.min(cmToM(style.frameWidthCm), Math.min(W, H) * 0.2);
+  const openW = W - 2 * bar;
+  const openH = H - 2 * bar;
+  const mat = clamp(cmToM(style.matCm), 0, Math.min(openW, openH) * 0.4);
+
+  return {
+    W,
+    H,
+    D,
+    bar,
+    openW,
+    openH,
+    artW: openW - 2 * mat,
+    artH: openH - 2 * mat,
+    // O rebaixo de ~9 mm é o que produz a auto-sombra real na boca da moldura em
+    // ângulo oblíquo — vende a tridimensionalidade mais do que qualquer luz.
+    frontZ: WALL_OFFSET + D,
+    recess: Math.min(0.01, D * 0.35),
+  };
 }
 
 export interface BuiltFrame {
@@ -20,9 +95,6 @@ export interface BuiltFrame {
   setOpacity(opacity: number): void;
   dispose(): void;
 }
-
-/** Folga entre a face de trás e o plano da parede, evitando z-fighting. */
-export const WALL_OFFSET = 0.002;
 
 /**
  * Sombra de verdade exigiria luz + shadow map + superfície receptora, e na
@@ -57,6 +129,37 @@ export function makeShadowTexture(three: ThreeNS, aspect: number, size = 256): T
   const tex = new three.CanvasTexture(canvas);
   tex.colorSpace = three.SRGBColorSpace;
   return tex;
+}
+
+/**
+ * As métricas de UM quadro, sem construir nada.
+ *
+ * O `<KitModel>` precisa delas para calcular o bounding box do conjunto ANTES de
+ * qualquer malha existir, e o `buildFrame` as devolve no fim. Uma função só para
+ * os dois não divergirem.
+ */
+export function itemMetrics(
+  product: Pick<ProductData, 'widthCm' | 'heightCm' | 'depthCm'>,
+  art: LoadedTexture,
+  style: Required<FrameStyle>,
+): FrameMetrics {
+  const dims = frameDimensions(product, style);
+  const fit = computeFit(dims.artW, dims.artH, art.aspect, style.fit);
+  return {
+    outer: { w: dims.W, h: dims.H, d: dims.D },
+    opening: { w: dims.openW, h: dims.openH },
+    artwork: { w: fit.planeW, h: fit.planeH },
+    imageAspect: art.aspect,
+    croppedFraction: fit.croppedFraction,
+  };
+}
+
+/** O par de luzes de `FRAME_LIGHTS`, pronto para entrar num Group. */
+export function makeFrameLights(three: ThreeNS): [THREE.AmbientLight, THREE.DirectionalLight] {
+  const ambient = new three.AmbientLight(0xffffff, FRAME_LIGHTS.ambientIntensity);
+  const dir = new three.DirectionalLight(0xffffff, FRAME_LIGHTS.directionalIntensity);
+  dir.position.set(...FRAME_LIGHTS.directionalPosition);
+  return [ambient, dir];
 }
 
 function buildFrameGeometry(
@@ -100,24 +203,23 @@ function buildFrameGeometry(
  *
  * `widthCm × heightCm` é a dimensão EXTERNA (moldura inclusa) — é como o
  * e-commerce anuncia o produto.
+ *
+ * `withLights` existe para o kit: as luzes são filhas do grupo (ver comentário
+ * lá embaixo), e N peças dariam 2N luzes na cena — o que recompila o shader da
+ * moldura à toa. O `buildKit` emite o par UMA vez, no grupo do conjunto, e passa
+ * `false` aqui. Padrão `true` para quem chama `buildFrame` direto.
  */
 export function buildFrame(
   three: ThreeNS,
   product: ProductData,
   art: LoadedTexture,
   style: Required<FrameStyle>,
+  withLights = true,
 ): BuiltFrame {
-  const W = cmToM(product.widthCm);
-  const H = cmToM(product.heightCm);
-  const D = cmToM(product.depthCm ?? 3);
-
-  // Clamp para mini-quadros: uma barra de 2 cm num 10×10 comeria quase tudo.
-  const bar = Math.min(cmToM(style.frameWidthCm), Math.min(W, H) * 0.2);
-  const openW = W - 2 * bar;
-  const openH = H - 2 * bar;
-  const mat = clamp(cmToM(style.matCm), 0, Math.min(openW, openH) * 0.4);
-  const artW = openW - 2 * mat;
-  const artH = openH - 2 * mat;
+  const { W, H, D, bar, openW, openH, artW, artH, frontZ, recess } = frameDimensions(
+    product,
+    style,
+  );
 
   const fit = computeFit(artW, artH, art.aspect, style.fit);
   if (fit.croppedFraction > 0.15) {
@@ -131,11 +233,6 @@ export function buildFrame(
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
   const ownTextures: THREE.Texture[] = [];
-
-  // O rebaixo de ~9 mm é o que produz a auto-sombra real na boca da moldura em
-  // ângulo oblíquo — vende a tridimensionalidade mais do que qualquer luz.
-  const frontZ = WALL_OFFSET + D;
-  const recess = Math.min(0.01, D * 0.35);
 
   // --- sombra -------------------------------------------------------------
   if (style.shadow === 'soft') {
@@ -218,22 +315,11 @@ export function buildFrame(
   // --- luzes --------------------------------------------------------------
   // Filhas do próprio Group para o sombreamento da moldura ficar estável,
   // independentemente de onde o usuário está na sala.
-  const ambient = new three.AmbientLight(0xffffff, 2.0);
-  const dir = new three.DirectionalLight(0xffffff, 2.2);
-  dir.position.set(-0.4, 0.8, 1.0);
-  group.add(ambient, dir);
-
-  const metrics: FrameMetrics = {
-    outer: { w: W, h: H, d: D },
-    opening: { w: openW, h: openH },
-    artwork: { w: fit.planeW, h: fit.planeH },
-    imageAspect: art.aspect,
-    croppedFraction: fit.croppedFraction,
-  };
+  if (withLights) group.add(...makeFrameLights(three));
 
   return {
     group,
-    metrics,
+    metrics: itemMetrics(product, art, style),
     setAmbient(scale) {
       artMaterial.color.setScalar(clamp(scale, 0.55, 1));
     },

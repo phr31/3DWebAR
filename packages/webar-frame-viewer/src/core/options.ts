@@ -1,4 +1,4 @@
-import type { ResolvedOptions, ViewerOptions } from './types';
+import type { KitData, KitItem, ProductData, ResolvedOptions, ViewerOptions } from './types';
 
 export function resolveOptions(options: ViewerOptions = {}): ResolvedOptions {
   return {
@@ -40,4 +40,68 @@ export function validateProduct(product: {
   if (!(product.heightCm && product.heightCm > 0))
     return 'product.heightCm deve ser maior que zero.';
   return null;
+}
+
+/**
+ * Valida o kit peça por peça, reusando `validateProduct`.
+ *
+ * A mensagem carrega o ÍNDICE porque, com cinco peças, "imageUrl é obrigatório"
+ * sozinho não diz em qual delas mexer — e este erro cai no `INVALID_PRODUCT`,
+ * que é erro de integração e precisa ser acionável de primeira.
+ */
+export function validateKit(kit: KitData): string | null {
+  if (!kit.items?.length) return 'kit.items precisa de pelo menos uma peça.';
+
+  for (const [i, item] of kit.items.entries()) {
+    const problem = validateProduct(item);
+    if (problem) return problem.replace(/^product\./, `kit.items[${i}].`);
+  }
+  return null;
+}
+
+/**
+ * O que o visualizador exibe, com produto solto e kit já reduzidos à mesma
+ * forma: uma lista de peças.
+ *
+ * `ARController` (vanilla) e `useAR`/`FrameViewer` (React) são orquestradores
+ * PARALELOS — um não embrulha o outro. Normalizar aqui, num lugar só, é o que
+ * impede os dois de divergirem sobre o que é um kit válido.
+ */
+export interface ViewerContent {
+  items: KitItem[];
+  /** `kit.id` ou `product.id`. Vai para o nome do arquivo da captura. */
+  id: string;
+  title: string;
+  /** Um kit de uma peça continua sendo kit — muda o nome do arquivo, só isso. */
+  isKit: boolean;
+}
+
+export function resolveContent(source: { product?: ProductData; kit?: KitData }): ViewerContent {
+  if (source.kit) {
+    return {
+      items: source.kit.items ?? [],
+      id: source.kit.id,
+      title: source.kit.title ?? '',
+      isKit: true,
+    };
+  }
+  const product = source.product;
+  return {
+    items: product ? [product] : [],
+    id: product?.id ?? '',
+    title: product?.title ?? '',
+    isKit: false,
+  };
+}
+
+export function validateContent(content: ViewerContent): string | null {
+  const [first] = content.items;
+  if (!first) {
+    return content.isKit
+      ? 'kit.items precisa de pelo menos uma peça.'
+      : 'informe `product` ou `kit` ao criar o visualizador.';
+  }
+  return content.isKit
+    ? validateKit({ id: content.id, items: content.items })
+    : validateProduct(first);
 }

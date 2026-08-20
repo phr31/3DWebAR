@@ -95,7 +95,8 @@
         margin-bottom: 3px;
       }
       input,
-      select {
+      select,
+      textarea {
         width: 100%;
         padding: 8px;
         background: #0d1117;
@@ -103,6 +104,11 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         font: inherit;
+      }
+      textarea {
+        resize: vertical;
+        font-size: 12px;
+        line-height: 1.4;
       }
       input[type='checkbox'] {
         width: auto;
@@ -160,6 +166,35 @@
         width: 100%;
         border-radius: 8px;
         display: block;
+      }
+      .thumbs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .thumbs:empty {
+        display: none;
+      }
+      .thumbs figure {
+        margin: 0;
+        width: 72px;
+        font-size: 10px;
+        color: var(--dim);
+        text-align: center;
+      }
+      .thumbs img {
+        width: 72px;
+        height: 72px;
+        object-fit: cover;
+        display: block;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: #0d1117;
+      }
+      /* A miniatura que não carrega é o diagnóstico: 404 ou CORS ausente. */
+      .thumbs img.bad {
+        border-color: var(--bad);
       }
       .banner {
         padding: 10px 12px;
@@ -290,6 +325,7 @@
     <section>
       <h2>Arte</h2>
       <img id="preview" alt="Prévia da arte" />
+      <div id="thumbs" class="thumbs"></div>
       <label style="margin-top: 10px">
         <span>Usar a sua própria imagem</span>
         <input id="arquivo" type="file" accept="image/*" />
@@ -327,6 +363,11 @@
         <li><code>capture()</code> deve devolver um Blob e abrir o share sheet pelo botão 📷 do overlay.</li>
         <li>Negar a permissão de câmera → erro <code>CAMERA_DENIED</code> com mensagem em pt-BR.</li>
         <li><code>destroy()</code> e iniciar de novo, duas vezes, sem degradar.</li>
+        <li><strong>Catálogo:</strong> escolher <em>Kit 2 Quadros… Rio de Janeiro</em> em <em>Produto de teste</em> → as duas miniaturas carregam (nenhuma com borda vermelha), os campos preenchem com <code>40×60</code>/<code>#000000</code>, e o log do <code>create()</code> traz <code>total 90.0×60.0 cm</code> (40 + 10 + 40). Na parede, as duas artes têm de ser <strong>diferentes</strong> e na ordem do array.</li>
+        <li><strong>Kit:</strong> ligar <em>usar kit</em> com 3 peças em <code>row</code> → <strong>um</strong> toque ancora as três juntas, e o retículo tem a largura do CONJUNTO, não a de uma peça.</li>
+        <li><strong>Kit:</strong> medir com fita a largura total e comparar com o <code>total</code> que o log imprime no <code>create()</code>; medir um vão entre peças e comparar com <code>gapCm</code>. É a única validação real de escala do conjunto.</li>
+        <li><strong>Kit:</strong> arrastar move o conjunto inteiro; o cadeado trava; tocar no conjunto travado reabre o ajuste.</li>
+        <li><strong>Kit:</strong> com <code>debug</code> ligado, <code>setProduct</code> alternando entre kit de 3 e produto solto — o contador <code>textures</code> do HUD tem de voltar ao mesmo valor. Duas peças com a mesma arte contam <strong>uma</strong> textura.</li>
       </ol>
     </section>
 
@@ -472,6 +513,70 @@
       const preview = document.getElementById('preview');
       preview.src = imageUrl;
 
+      // ---------------------------------------------------------- catálogo
+      /**
+       * SKUs reais, no formato em que o e-commerce entrega: `quantity` peças e
+       * um `imageUrl` por peça, na ordem em que devem aparecer na parede.
+       *
+       * A lib NÃO consome esta forma — ela modela conjunto como `KitData`, com
+       * uma peça por item e a URL dentro da peça. A conversão é o `catalogoParaCfg`
+       * lá embaixo, e é de propósito que ela more aqui: isto é dado de QA, não
+       * API de biblioteca.
+       *
+       * `moldura` fica registrado só para documentar o que vem do catálogo — o
+       * motor AR não usa.
+       */
+      const CATALOGO = [
+        {
+          id: 'OT|271-1-000+384-1-1-0-0-40x60-2',
+          title: 'Kit 2 Quadros Decorativos Cidades Rio de Janeiro Por do Sol',
+          quantity: 2,
+          moldura: 'Sem Vidro',
+          color: 'Preto',
+          imageUrl: [
+            'https://acdn-us.mitiendanube.com/stores/003/889/735/products/i-63e09cf5bee196125717270963791669-1024-1024.webp',
+            'https://acdn-us.mitiendanube.com/stores/003/889/735/products/ii-b578868f9a8ed684e617270963791623-1024-1024.webp',
+          ],
+          widthCm: 40,
+          heightCm: 60,
+          depthCm: 3,
+        },
+        {
+          id: 'OT|718-1-000+385-1-1-0-0-60x90-1',
+          title: 'Quadro Decorativo Jesus em Oração',
+          quantity: 1,
+          moldura: 'Sem Vidro',
+          color: 'Branco',
+          imageUrl: [
+            'https://acdn-us.mitiendanube.com/stores/003/889/735/products/ot718-87x57-2aa6bfcb13ef37161c17150025670595-1024-1024.webp',
+          ],
+          widthCm: 60,
+          heightCm: 90,
+          depthCm: 3,
+        },
+        {
+          id: 'OT|558-1-000+384-1-1-0-0-40x60-3',
+          title: 'Kit 3 Quadros Decorativos Henry Matisse Escultura PB',
+          quantity: 3,
+          moldura: 'Sem Vidro',
+          color: 'Preto',
+          imageUrl: [
+            'https://acdn-us.mitiendanube.com/stores/003/889/735/products/iii-c328bd980c12e404f717271235381102-1024-1024.webp',
+            'https://acdn-us.mitiendanube.com/stores/003/889/735/products/ii-518da2b912e5f3bcd617271235386123-1024-1024.webp',
+            'https://acdn-us.mitiendanube.com/stores/003/889/735/products/i-dce3411a991dd930e317271235382831-1024-1024.webp',
+          ],
+          widthCm: 40,
+          heightCm: 60,
+          depthCm: 3,
+        },
+      ];
+
+      /** O catálogo nomeia a cor; a lib quer hex. */
+      const CORES = { Preto: '#000000', Branco: '#ffffff' };
+
+      /** Vão entre as bordas das peças de um kit de catálogo, em cm. */
+      const CATALOGO_GAP_CM = 10;
+
       document.getElementById('arquivo').addEventListener('change', (ev) => {
         const file = ev.target.files?.[0];
         if (!file) return;
@@ -483,11 +588,43 @@
       // ------------------------------------------------------- configuração
       // Os padrões espelham resolveOptions() em core/options.ts.
       const FIELDS = [
+        { group: 'Catálogo' },
+        {
+          key: 'produto',
+          label: 'Produto de teste',
+          type: 'select',
+          def: '',
+          full: true,
+          options: [['', 'Selecione um produto…'], ...CATALOGO.map((p) => [p.id, p.title])],
+        },
+
         { group: 'Produto' },
-        { key: 'title', label: 'title', type: 'text', def: 'Quadro Abstrato 50 × 70' },
+        { key: 'id', label: 'id (SKU)', type: 'text', def: 'diag-001', full: true },
+        { key: 'title', label: 'title', type: 'text', def: 'Quadro Abstrato 50 × 70', full: true },
+        {
+          key: 'imageUrls',
+          label: 'imageUrl — uma por linha, uma por peça (vazio = arte de demonstração)',
+          type: 'textarea',
+          def: '',
+          full: true,
+          rows: 3,
+        },
         { key: 'widthCm', label: 'widthCm', type: 'number', def: 50, step: 1 },
         { key: 'heightCm', label: 'heightCm', type: 'number', def: 70, step: 1 },
         { key: 'depthCm', label: 'depthCm', type: 'number', def: 3, step: 0.5 },
+
+        { group: 'Kit (múltiplos quadros)' },
+        { key: 'kitEnabled', label: 'usar kit', type: 'checkbox', def: false },
+        { key: 'kitCount', label: 'peças (1–5)', type: 'number', def: 3, step: 1 },
+        {
+          key: 'kitLayout',
+          label: 'layout',
+          type: 'select',
+          def: 'row',
+          options: [['row', 'row'], ['stack', 'stack'], ['grid', 'grid']],
+        },
+        { key: 'kitGapCm', label: 'gapCm', type: 'number', def: 6, step: 1 },
+        { key: 'kitMixSizes', label: 'variar tamanhos', type: 'checkbox', def: true },
 
         { group: 'Sessão' },
         {
@@ -563,7 +700,9 @@
           const input =
             field.type === 'select'
               ? document.createElement('select')
-              : document.createElement('input');
+              : field.type === 'textarea'
+                ? document.createElement('textarea')
+                : document.createElement('input');
           input.id = `f-${field.key}`;
           if (field.type === 'select') {
             for (const [value, text] of field.options) {
@@ -572,12 +711,14 @@
               opt.textContent = text;
               input.append(opt);
             }
+          } else if (field.type === 'textarea') {
+            input.rows = field.rows ?? 3;
           } else {
             input.type = field.type;
             if (field.step) input.step = String(field.step);
           }
           label.append(span, input);
-          if (field.key === 'title') label.classList.add('full');
+          if (field.full) label.classList.add('full');
         }
         formEl.append(label);
       }
@@ -635,12 +776,111 @@
         return { ...DEFAULTS };
       }
 
+      /** URLs do campo, uma por linha. Vazio = usar a arte de demonstração. */
+      function parseUrls(valor) {
+        return String(valor || '')
+          .split(/\s+/)
+          .filter(Boolean);
+      }
+
+      const thumbsEl = document.getElementById('thumbs');
+
+      /**
+       * Miniaturas das artes, na ordem em que os quadros vão aparecer na parede.
+       *
+       * Lê do CAMPO, não do catálogo, para refletir também edição manual. O
+       * `onerror` é o que mais importa numa página de diagnóstico: separa na hora
+       * a URL que não existe da que existe mas não manda
+       * `Access-Control-Allow-Origin` — as duas quebram a textura do mesmo jeito.
+       */
+      function renderThumbs() {
+        const urls = parseUrls(document.getElementById('f-imageUrls').value);
+        thumbsEl.replaceChildren();
+
+        urls.forEach((url, i) => {
+          const fig = document.createElement('figure');
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = `Peça ${i + 1}`;
+          img.loading = 'lazy';
+          img.addEventListener('error', () => {
+            img.classList.add('bad');
+            log('warn', `miniatura ${i + 1} não carregou (404 ou CORS): ${url}`);
+          });
+          const cap = document.createElement('figcaption');
+          cap.textContent = `Peça ${i + 1}`;
+          fig.append(img, cap);
+          thumbsEl.append(fig);
+        });
+      }
+
+      /**
+       * Traduz um produto do catálogo para os campos do formulário. Daqui em
+       * diante o fluxo é o de sempre: `readForm` → `buildContent` → `create`.
+       *
+       * `quantity > 1` liga o kit em `row` com 10 cm entre as bordas e desliga
+       * "variar tamanhos" — as peças de um kit de catálogo têm todas o mesmo
+       * tamanho. Com `quantity: 1` o kit fica desligado e o caminho é o de
+       * produto solto, exatamente como a lib trataria.
+       */
+      function aplicarProduto(p) {
+        const set = (key, value) => {
+          document.getElementById(`f-${key}`).value = String(value);
+        };
+        const check = (key, value) => {
+          document.getElementById(`f-${key}`).checked = value;
+        };
+
+        set('id', p.id);
+        set('title', p.title);
+        set('widthCm', p.widthCm);
+        set('heightCm', p.heightCm);
+        set('depthCm', p.depthCm);
+        set('frameColor', CORES[p.color] ?? p.color);
+        set('imageUrls', p.imageUrl.join('\n'));
+
+        check('kitEnabled', p.quantity > 1);
+        set('kitCount', p.quantity);
+        set('kitLayout', 'row');
+        set('kitGapCm', CATALOGO_GAP_CM);
+        check('kitMixSizes', false);
+
+        preview.src = p.imageUrl[0];
+      }
+
       writeForm(loadCfg());
-      formEl.addEventListener('change', saveCfg);
+      renderThumbs();
+
+      // O listener do select vem ANTES do delegado: ele preenche os campos, e o
+      // `change` que borbulha até o formulário salva e redesenha as miniaturas já
+      // com os valores novos.
+      document.getElementById('f-produto').addEventListener('change', (ev) => {
+        const p = CATALOGO.find((item) => item.id === ev.target.value);
+        if (!p) {
+          // Placeholder: volta para a arte de demonstração / arquivo. Os controles
+          // manuais de kit ficam como estão — seguem servindo ao QA de layout.
+          document.getElementById('f-imageUrls').value = '';
+          preview.src = imageUrl;
+          log('act', 'produto de teste: nenhum (arte de demonstração)');
+          return;
+        }
+        aplicarProduto(p);
+        log(
+          'act',
+          `produto de teste: ${p.title} · ${p.quantity}× ${p.widthCm}×${p.heightCm} cm · ${p.id}`,
+        );
+      });
+
+      formEl.addEventListener('change', () => {
+        saveCfg();
+        renderThumbs();
+      });
 
       document.getElementById('reset-cfg').addEventListener('click', () => {
         writeForm(DEFAULTS);
         saveCfg();
+        renderThumbs();
+        preview.src = imageUrl;
         log('act', 'configuração restaurada aos padrões');
       });
 
@@ -655,15 +895,87 @@
         }
       });
 
-      function buildProduct(cfg, url) {
+      /**
+       * As artes do conjunto, em ordem: a peça `i` usa `urls[i]`.
+       *
+       * Com o campo preenchido (produto de catálogo ou lista digitada), é a lista
+       * dele. Vazio, cai na alternância ARTE_A/ARTE_B de sempre — que são URLs
+       * repetidas de propósito, para exercitar o refcount do `AssetLoader`: duas
+       * peças com a mesma arte têm de contar UMA textura.
+       */
+      function artesDoKit(cfg) {
+        const urls = parseUrls(cfg.imageUrls);
+        if (urls.length) return artesInvertidas ? [...urls].reverse() : urls;
+        const outra = imageUrl === ARTE_A ? ARTE_B : ARTE_A;
+        return [imageUrl, outra];
+      }
+
+      function buildProduct(cfg, urls) {
         return {
-          id: 'diag-001',
+          id: cfg.id || 'diag-001',
           title: cfg.title,
-          imageUrl: url,
+          imageUrl: urls[0],
           widthCm: cfg.widthCm,
           heightCm: cfg.heightCm,
           depthCm: cfg.depthCm,
         };
+      }
+
+      // Proporções aplicadas ao tamanho base quando "variar tamanhos" está
+      // ligado. Um kit de peças todas iguais esconde justamente o que interessa
+      // testar: se o bounding box e o vão continuam certos com tamanhos mistos.
+      const KIT_SCALES = [1, 0.7, 0.85, 0.6, 0.75];
+
+      /**
+       * Monta o kit a partir da configuração e delega os offsets ao `layoutKit`
+       * da lib — que é a MESMA função que a página de produto usaria.
+       *
+       * A arte sai de `urls[i % urls.length]`: com um produto de catálogo a lista
+       * tem exatamente `quantity` itens e o casamento é 1:1 (quadro 1 →
+       * `imageUrl[0]`, quadro 2 → `imageUrl[1]`…). Se o tester subir "peças"
+       * acima do que o produto tem, a lista cicla em vez de deixar buracos.
+       */
+      function buildKitData(cfg, urls) {
+        const count = Math.max(1, Math.min(5, Math.round(cfg.kitCount) || 1));
+        const items = [];
+
+        for (let i = 0; i < count; i++) {
+          const scale = cfg.kitMixSizes ? (KIT_SCALES[i] ?? 1) : 1;
+          items.push({
+            id: `${cfg.id || 'diag-kit'}-${i + 1}`,
+            imageUrl: urls[i % urls.length],
+            widthCm: Math.round(cfg.widthCm * scale),
+            heightCm: Math.round(cfg.heightCm * scale),
+            depthCm: cfg.depthCm,
+          });
+        }
+
+        return {
+          id: cfg.id || 'diag-kit',
+          title: cfg.title,
+          items: window.FrameViewer.layoutKit(items, {
+            layout: cfg.kitLayout,
+            gapCm: cfg.kitGapCm,
+          }),
+        };
+      }
+
+      /** `{ product }` ou `{ kit }`, conforme a configuração. */
+      function buildContent(cfg) {
+        const urls = artesDoKit(cfg);
+        return cfg.kitEnabled
+          ? { kit: buildKitData(cfg, urls) }
+          : { product: buildProduct(cfg, urls) };
+      }
+
+      /** Largura × altura totais do conjunto — o número a conferir com a fita. */
+      function describeContent(content) {
+        if (!content.kit) return `product ${content.product.widthCm}×${content.product.heightCm} cm`;
+        const b = window.FrameViewer.kitBounds(content.kit.items);
+        return (
+          `kit de ${content.kit.items.length} · ` +
+          `total ${b.widthCm.toFixed(1)}×${b.heightCm.toFixed(1)} cm`
+        );
       }
 
       function buildOptions(cfg) {
@@ -767,6 +1079,8 @@
       const bEngine = document.getElementById('b-engine');
       let viewer = null;
       let usandoArteB = false;
+      /** `swap` com produto de catálogo: inverte a ordem das artes do kit. */
+      let artesInvertidas = false;
 
       function bind(v) {
         // Assinar antes de start(): 'status: loading' e falhas precoces de
@@ -805,11 +1119,13 @@
         t0 = performance.now();
         drawer.classList.add('open');
         document.getElementById('toggle-log').textContent = 'Log ▼';
+        const content = buildContent(cfg);
         log('act', `create(${fmt({ engine: cfg.engine || 'auto', locale: cfg.locale })})`);
+        log('ok', describeContent(content));
 
         viewer = window.FrameViewer.create({
           container: document.getElementById('root'),
-          product: buildProduct(cfg, imageUrl),
+          ...content,
           options: buildOptions(cfg),
         });
         bind(viewer);
@@ -838,11 +1154,35 @@
           );
         },
         swap: async () => {
-          usandoArteB = !usandoArteB;
-          imageUrl = usandoArteB ? ARTE_B : ARTE_A;
-          preview.src = imageUrl;
-          await viewer.setProduct(buildProduct(readForm(), imageUrl));
-          log('ok', `setProduct → arte ${usandoArteB ? 'B' : 'A'}`);
+          const cfg = readForm();
+          // Com um produto de catálogo na jogada, trocar por ARTE_A/ARTE_B
+          // descartaria justamente o que se quer testar. Inverter a ordem troca
+          // as texturas de todas as peças, que é o ponto do teste de refcount.
+          const daLista = parseUrls(cfg.imageUrls);
+          let arte;
+          if (daLista.length > 1) {
+            artesInvertidas = !artesInvertidas;
+            arte = artesInvertidas ? 'ordem invertida' : 'ordem original';
+          } else if (daLista.length === 1) {
+            arte = 'peça única do catálogo (nada a inverter)';
+          } else {
+            usandoArteB = !usandoArteB;
+            imageUrl = usandoArteB ? ARTE_B : ARTE_A;
+            preview.src = imageUrl;
+            arte = usandoArteB ? 'B' : 'A';
+          }
+
+          const content = buildContent(cfg);
+          // `setKit` e `setProduct` têm o mesmo contrato: carregam o novo
+          // conteúdo, montam, e só então soltam as texturas do anterior.
+          if (content.kit) await viewer.setKit(content.kit);
+          else await viewer.setProduct(content.product);
+
+          log(
+            'ok',
+            `${content.kit ? 'setKit' : 'setProduct'} → arte ${arte} · ` +
+              describeContent(content),
+          );
         },
         destroy: async () => {
           await viewer.destroy();

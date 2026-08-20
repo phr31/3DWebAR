@@ -18,6 +18,37 @@ export interface ProductData {
 }
 
 /**
+ * Uma peça de um kit.
+ *
+ * Estende `ProductData` de propósito: `validateProduct` vale sem alteração, e o
+ * integrador que já monta produtos só precisa acrescentar a posição.
+ *
+ * Os offsets são do CENTRO da peça até a origem do arranjo, em centímetros, com
+ * +X à direita e +Y para cima — o mesmo sistema do plano da parede. A origem não
+ * precisa ser o centro do conjunto: `kitBounds` recentra tudo, então uma linha
+ * escrita como `0, 60, 120` fica idêntica a `-60, 0, 60`.
+ */
+export interface KitItem extends ProductData {
+  offsetXCm?: number;
+  offsetYCm?: number;
+  /** Estilo desta peça. Ausente = herda `options.frame`. */
+  frame?: FrameStyle;
+}
+
+/**
+ * Um conjunto de quadros posicionado como BLOCO ÚNICO: um hit-test, uma âncora,
+ * um arraste move tudo. O arranjo entre as peças é fixo — é o que faz o kit ser
+ * um kit, e o que mantém intactos os engines, os gestos e a âncora.
+ */
+export interface KitData {
+  id: string;
+  /** Nome exibido no topo do overlay. */
+  title?: string;
+  /** Pelo menos uma. Um kit de uma peça é indistinguível de um produto solto. */
+  items: KitItem[];
+}
+
+/**
  * Como conciliar a proporção da imagem com as dimensões do produto quando elas
  * divergem.
  * - `contain`: preserva a arte inteira e completa com passe-partout (padrão).

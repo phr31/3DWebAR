@@ -22,4 +22,7 @@ setDefaultThreeLoader(
 export const create = (config: ViewerConfig): ARController => createViewer(config);
 export const isSupported = detectCapabilities;
 export { userMessage } from './core/errors';
+// Arranjo de kit: aritmética pura, e é o que a página de diagnóstico usa em
+// `<script>` para montar um conjunto sem calcular offsets à mão.
+export { kitBounds, layoutKit } from './core/kitLayout';
 export { ARController, provideThree };

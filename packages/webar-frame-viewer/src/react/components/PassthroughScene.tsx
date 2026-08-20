@@ -6,12 +6,12 @@ import type * as THREE from 'three';
 import type { LoadedTexture } from '../../core/AssetLoader';
 import type { ARError } from '../../core/errors';
 import type { YawStatus } from '../../core/passthrough/orientation';
-import type { FrameStyle, ProductData, ResolvedOptions } from '../../core/types';
+import type { FrameStyle, KitItem, ResolvedOptions } from '../../core/types';
 import type { ARApi } from '../hooks/useAR';
 import { DEBUG_INTERVAL_MS, useFrameStats } from '../hooks/useFrameStats';
 import { usePassthrough } from '../hooks/usePassthrough';
 import { usePassthroughPlacement } from '../hooks/usePassthroughPlacement';
-import { FrameModel } from './FrameModel';
+import { KitModel } from './KitModel';
 
 /**
  * Cena do caminho de passthrough (iOS e qualquer aparelho sem WebXR).
@@ -22,8 +22,10 @@ import { FrameModel } from './FrameModel';
  */
 
 export interface PassthroughSceneProps {
-  product: ProductData;
-  art: LoadedTexture;
+  /** As peças do conteúdo. Um produto solto chega aqui como lista de uma. */
+  items: KitItem[];
+  /** Uma textura por peça, na mesma ordem. */
+  arts: LoadedTexture[];
   style: Required<FrameStyle>;
   options: ResolvedOptions;
   api: ARApi;
@@ -33,8 +35,8 @@ export interface PassthroughSceneProps {
 }
 
 function PassthroughSceneImpl({
-  product,
-  art,
+  items,
+  arts,
   style,
   options,
   api,
@@ -151,10 +153,10 @@ function PassthroughSceneImpl({
   });
 
   return (
-    <FrameModel
+    <KitModel
       ref={groupRef}
-      product={product}
-      art={art}
+      items={items}
+      arts={arts}
       style={style}
       ambient={ambient}
       // 0.85 sob o dedo deixa claro que ainda não está fixado. A visibilidade em
@@ -168,6 +170,7 @@ function PassthroughSceneImpl({
 /**
  * Memo: o elemento é filho do `<Canvas>`, que o R3F reconcilia a cada render do
  * componente que o hospeda. Todas as props aqui já são estáveis (`api` sai de um
- * `useMemo`, `style` é `options.frame`), então a comparação rasa acerta sempre.
+ * `useMemo`, `style` é `options.frame`, `items` e `arts` são memoizados no
+ * `<FrameViewer>`), então a comparação rasa acerta sempre.
  */
 export const PassthroughScene = memo(PassthroughSceneImpl);

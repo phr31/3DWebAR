@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
-import { detectCapabilities, type ProductData } from 'webar-frame-viewer/core';
+import { detectCapabilities, type KitData, type ProductData } from 'webar-frame-viewer/core';
 
 /**
  * `ssr: false` é obrigatório: o `FrameViewer` monta um `<Canvas>` do R3F, que
@@ -14,7 +14,11 @@ const FrameViewer = dynamic(() => import('webar-frame-viewer').then((mod) => mod
   ssr: false,
 });
 
-export function ProductAR({ product }: { product: ProductData }) {
+/**
+ * Um produto solto OU um kit. O `<FrameViewer>` aceita os dois e trata o kit
+ * como bloco único: um hit-test, uma âncora, um arraste move o conjunto.
+ */
+export function ProductAR({ product, kit }: { product?: ProductData; kit?: KitData }) {
   const [isOpen, setIsOpen] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
   // `?debug=1` liga o HUD com engine e sensores. Num effect, e não durante o
@@ -54,12 +58,13 @@ export function ProductAR({ product }: { product: ProductData }) {
           color: '#fff',
         }}
       >
-        Ver na sua Parede
+        {kit ? 'Ver o kit na sua Parede' : 'Ver na sua Parede'}
       </button>
 
       {isOpen && (
         <FrameViewer
           product={product}
+          kit={kit}
           options={{
             debug,
             // O fluxo de orientação (apontar → tocar → ajustar → 🔒) já vem

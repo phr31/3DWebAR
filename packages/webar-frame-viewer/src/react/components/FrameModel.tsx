@@ -3,8 +3,14 @@
 import { forwardRef, memo, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { LoadedTexture } from '../../core/AssetLoader';
-import { makeShadowTexture, WALL_OFFSET } from '../../core/FrameBuilder';
-import { clamp, cmToM, computeFit } from '../../core/TransformUtils';
+import {
+  FRAME_LIGHTS,
+  type FrameMetrics,
+  frameDimensions,
+  makeShadowTexture,
+  WALL_OFFSET,
+} from '../../core/FrameBuilder';
+import { clamp, computeFit } from '../../core/TransformUtils';
 import type { FrameStyle, ProductData } from '../../core/types';
 import { cloneForInstance } from '../hooks/useArtTexture';
 
@@ -20,13 +26,12 @@ import { cloneForInstance } from '../hooks/useArtTexture';
  * e-commerce anuncia o produto.
  */
 
-export interface FrameMetrics {
-  outer: { w: number; h: number; d: number };
-  opening: { w: number; h: number };
-  artwork: { w: number; h: number };
-  imageAspect: number;
-  croppedFraction: number;
-}
+/**
+ * Reexportado do núcleo, e não redeclarado: o `buildFrame` do UMD e este
+ * componente reportam a MESMA coisa, e duas cópias estruturalmente iguais só
+ * esperam a hora de divergir.
+ */
+export type { FrameMetrics };
 
 export interface FrameModelProps {
   product: ProductData;
@@ -40,30 +45,34 @@ export interface FrameModelProps {
    * ambiente. Vem do `light-estimation` do XR ou da amostragem do vídeo.
    */
   ambient?: number;
+  /**
+   * Posição local, em metros. Usada pelo `<KitModel>` para distribuir as peças
+   * dentro do grupo do conjunto; sem kit o quadro fica na origem do grupo.
+   */
+  position?: [number, number, number];
+  /**
+   * Emitir o par de luzes junto com o quadro. Padrão `true`.
+   *
+   * O `<KitModel>` passa `false` e emite as luzes UMA vez no grupo do conjunto:
+   * N peças dariam 2N luzes na cena, e a moldura é o único material que as usa.
+   */
+  lights?: boolean;
   onMetrics?(metrics: FrameMetrics): void;
 }
 
+/**
+ * Medidas do quadro em metros. Fina sobre `frameDimensions` do núcleo — que é a
+ * MESMA função usada pelo `buildFrame` do build UMD, para os dois caminhos não
+ * poderem divergir no tamanho da peça.
+ */
 export function useFrameGeometry(product: ProductData, style: Required<FrameStyle>) {
-  return useMemo(() => {
-    const W = cmToM(product.widthCm);
-    const H = cmToM(product.heightCm);
-    const D = cmToM(product.depthCm ?? 3);
+  const { widthCm, heightCm, depthCm } = product;
+  const { frameWidthCm, matCm } = style;
 
-    // Clamp para mini-quadros: uma barra de 2 cm num 10×10 comeria quase tudo.
-    const bar = Math.min(cmToM(style.frameWidthCm), Math.min(W, H) * 0.2);
-    const openW = W - 2 * bar;
-    const openH = H - 2 * bar;
-    const mat = clamp(cmToM(style.matCm), 0, Math.min(openW, openH) * 0.4);
-    const artW = openW - 2 * mat;
-    const artH = openH - 2 * mat;
-
-    // O rebaixo de ~9 mm é o que produz a auto-sombra real na boca da moldura em
-    // ângulo oblíquo — vende a tridimensionalidade mais do que qualquer luz.
-    const frontZ = WALL_OFFSET + D;
-    const recess = Math.min(0.01, D * 0.35);
-
-    return { W, H, D, bar, openW, openH, artW, artH, frontZ, recess };
-  }, [product.widthCm, product.heightCm, product.depthCm, style.frameWidthCm, style.matCm]);
+  return useMemo(
+    () => frameDimensions({ widthCm, heightCm, depthCm }, { frameWidthCm, matCm }),
+    [widthCm, heightCm, depthCm, frameWidthCm, matCm],
+  );
 }
 
 /** Contorno externo CCW com o furo enrolado ao contrário — a triangulação depende disso. */
@@ -87,7 +96,17 @@ function makeFrameShape(W: number, H: number, openW: number, openH: number): THR
 }
 
 const FrameModelImpl = forwardRef<THREE.Group, FrameModelProps>(function FrameModel(
-  { product, art, style, opacity = 1, visible = true, ambient = 1, onMetrics },
+  {
+    product,
+    art,
+    style,
+    opacity = 1,
+    visible = true,
+    ambient = 1,
+    position,
+    lights = true,
+    onMetrics,
+  },
   ref,
 ) {
   const dims = useFrameGeometry(product, style);
@@ -168,7 +187,7 @@ const FrameModelImpl = forwardRef<THREE.Group, FrameModelProps>(function FrameMo
   const artColor = useMemo(() => new THREE.Color().setScalar(clamp(ambient, 0.55, 1)), [ambient]);
 
   return (
-    <group ref={ref} visible={visible}>
+    <group ref={ref} visible={visible} position={position}>
       {/* Sombra: mantém a opacidade própria, o estado "seguindo" não a apaga. */}
       {shadow && (
         <mesh position={[0, -0.01, 0.001]} renderOrder={-1}>
@@ -231,10 +250,18 @@ const FrameModelImpl = forwardRef<THREE.Group, FrameModelProps>(function FrameMo
 
       {/*
         Luzes filhas do próprio grupo: o sombreamento da moldura fica estável
-        independentemente de onde o usuário está na sala.
+        independentemente de onde o usuário está na sala. Num kit elas sobem para
+        o grupo do conjunto — ver `lights` nas props.
       */}
-      <ambientLight intensity={2.0} />
-      <directionalLight intensity={2.2} position={[-0.4, 0.8, 1.0]} />
+      {lights && (
+        <>
+          <ambientLight intensity={FRAME_LIGHTS.ambientIntensity} />
+          <directionalLight
+            intensity={FRAME_LIGHTS.directionalIntensity}
+            position={FRAME_LIGHTS.directionalPosition}
+          />
+        </>
+      )}
     </group>
   );
 });

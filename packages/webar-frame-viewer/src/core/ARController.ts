@@ -7,14 +7,16 @@ import { PassthroughSceneManager } from './engines/PassthroughSceneManager';
 import { WebXRSceneManager } from './engines/WebXRSceneManager';
 import { ARError, normalizeError, userMessage } from './errors';
 import { Emitter } from './events';
-import { type BuiltFrame, buildFrame } from './FrameBuilder';
+import type { BuiltFrame } from './FrameBuilder';
+import { buildKit } from './KitBuilder';
 import { loadThree, provideThree, type ThreeNS } from './loadThree';
-import { resolveOptions, validateProduct } from './options';
+import { resolveContent, resolveOptions, type ViewerContent, validateContent } from './options';
 import type { SceneManager, SceneMountContext } from './SceneManager';
 import type {
   AREventMap,
   ARHint,
   ARStatus,
+  KitData,
   ProductData,
   ResolvedOptions,
   SceneKind,
@@ -26,7 +28,10 @@ const ANISOTROPY = 8;
 
 export interface ViewerConfig {
   container: HTMLElement;
-  product: ProductData;
+  /** Um quadro. Mutuamente exclusivo com `kit`. */
+  product?: ProductData;
+  /** Um conjunto posicionado como bloco único. Mutuamente exclusivo com `product`. */
+  kit?: KitData;
   options?: ViewerOptions;
 }
 
@@ -40,14 +45,15 @@ export class ARController {
   private readonly t: (key: StringKey) => string;
   private readonly abort = new AbortController();
 
-  private product: ProductData;
+  private content: ViewerContent;
   private container: HTMLElement;
   private overlay: Overlay | null = null;
   private manager: SceneManager | null = null;
   private three: ThreeNS | null = null;
   private frame: BuiltFrame | null = null;
   private caps: CapabilityReport | null = null;
-  private loadedUrl: string | null = null;
+  /** Uma URL por peça, na ordem das peças. Pode repetir: o refcount aguenta. */
+  private loadedUrls: string[] = [];
   private pendingCapture: Promise<Blob | null> | null = null;
 
   private state: ARStatus = 'idle';
@@ -56,7 +62,7 @@ export class ARController {
 
   private constructor(config: ViewerConfig) {
     this.container = config.container;
-    this.product = config.product;
+    this.content = resolveContent(config);
     this.options = resolveOptions(config.options);
     this.t = createStrings(this.options.locale, config.options?.strings);
 
@@ -154,7 +160,16 @@ export class ARController {
   }
 
   async setProduct(product: ProductData): Promise<void> {
-    this.product = product;
+    await this.setContent({ product });
+  }
+
+  /** Troca o conjunto exibido. Mesmo contrato de `setProduct`. */
+  async setKit(kit: KitData): Promise<void> {
+    await this.setContent({ kit });
+  }
+
+  private async setContent(source: { product?: ProductData; kit?: KitData }): Promise<void> {
+    this.content = resolveContent(source);
     if (!this.manager || !this.three) return;
     await this.loadContent(this.three);
   }
@@ -173,10 +188,8 @@ export class ARController {
 
     this.frame?.dispose();
     this.frame = null;
-    if (this.loadedUrl) {
-      release(this.loadedUrl);
-      this.loadedUrl = null;
-    }
+    for (const url of this.loadedUrls) release(url);
+    this.loadedUrls = [];
 
     this.overlay?.destroy();
     this.overlay = null;
@@ -200,7 +213,7 @@ export class ARController {
       onPrimaryAction: () => this.onPrimaryAction(),
       onSecondaryAction: () => this.dismissPanel(),
     });
-    this.overlay.setTitle(this.product.title ?? '');
+    this.overlay.setTitle(this.content.title);
     this.overlay.setState('idle');
   }
 
@@ -234,7 +247,7 @@ export class ARController {
     this.caps = await detectCapabilities();
     if (this.abort.signal.aborted) return;
 
-    const invalid = validateProduct(this.product);
+    const invalid = validateContent(this.content);
     if (invalid) throw new ARError('INVALID_PRODUCT', invalid, { locale: this.options.locale });
 
     if (this.caps.inAppBrowser) {
@@ -310,27 +323,48 @@ export class ARController {
   }
 
   private async loadContent(three: ThreeNS): Promise<void> {
-    const previousUrl = this.loadedUrl;
+    const previousUrls = this.loadedUrls;
     const previousFrame = this.frame;
 
-    let art: Awaited<ReturnType<typeof acquire>>;
+    const { items } = this.content;
+    const urls = items.map((item) => item.imageUrl);
+
+    // `acquire` incrementa o refcount de forma SÍNCRONA, então as URLs já estão
+    // retidas antes do primeiro await — é o que faz o `release` do caminho de
+    // aborto parear certo. Uma peça que falha derruba o conjunto: um kit com um
+    // buraco no meio mente sobre o produto.
+    const pending = items.map((item) =>
+      acquire(three, item.imageUrl, ANISOTROPY).then((art) => ({ item, art })),
+    );
+    // `Promise.all` rejeita na primeira falha e as irmãs virariam unhandled
+    // rejections no navegador de um comprador. Anexar o handler agora não
+    // interfere no `all`, que continua observando as promises originais.
+    for (const p of pending) p.catch(() => undefined);
+
+    let parts: Awaited<(typeof pending)[number]>[];
     try {
-      art = await acquire(three, this.product.imageUrl, ANISOTROPY);
+      parts = await Promise.all(pending);
     } catch (err) {
+      // Soltar tudo: quem carregou com sucesso ficou retido pelo acquire síncrono.
+      for (const url of urls) release(url);
       throw normalizeError(err, 'asset', { locale: this.options.locale });
     }
     if (this.abort.signal.aborted) {
-      release(this.product.imageUrl);
+      for (const url of urls) release(url);
       return;
     }
 
-    this.loadedUrl = this.product.imageUrl;
-    this.frame = buildFrame(three, this.product, art, this.options.frame);
+    this.loadedUrls = urls;
+    // Sempre `buildKit`, inclusive para um produto solto: um caminho de código
+    // só vale mais do que o `Group` a mais que o caso de uma peça carrega. As
+    // métricas de um kit de um são as do próprio quadro, sem diferença nenhuma.
+    this.frame = buildKit(three, parts, this.options.frame);
     this.manager?.setContent(this.frame);
-    this.overlay?.setTitle(this.product.title ?? '');
+    this.overlay?.setTitle(this.content.title);
 
+    // Só depois de o novo conteúdo estar montado — inverter faria a troca piscar.
     previousFrame?.dispose();
-    if (previousUrl) release(previousUrl);
+    for (const url of previousUrls) release(url);
   }
 
   private onSceneEvent(type: string, payload: unknown): void {
@@ -394,7 +428,8 @@ export class ARController {
     this.pendingCapture = null;
     const blob = await pending;
     if (!blob) return;
-    await shareOrDownload(blob, `quadro-${this.product.id || 'ar'}.jpg`);
+    const prefix = this.content.isKit ? 'kit' : 'quadro';
+    await shareOrDownload(blob, `${prefix}-${this.content.id || 'ar'}.jpg`);
   }
 }
 
